@@ -32,3 +32,8 @@ credentials.txt
 
 # Node
 node_modules/
+
+# Local config with secrets
+start-chat-server.sh
+remotelab-auth.service
+remotelab-chat.service

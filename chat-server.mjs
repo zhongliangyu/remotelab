@@ -25,7 +25,7 @@ function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-server.listen(CHAT_PORT, '127.0.0.1', () => {
-  console.log(`Chat server listening on http://127.0.0.1:${CHAT_PORT}`);
+server.listen(CHAT_PORT, '0.0.0.0', () => {
+  console.log(`Chat server listening on http://0.0.0.0:${CHAT_PORT}`);
   console.log(`Cookie mode: ${SECURE_COOKIES ? 'Secure (HTTPS)' : 'Non-secure (localhost)'}`);
 });

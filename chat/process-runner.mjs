@@ -137,7 +137,11 @@ export function spawnTool(toolId, folder, prompt, onEvent, onExit, options = {})
   const resolvedFolder = resolveCwd(folder);
 
   // Clean env: remove CLAUDECODE markers so nested Claude Code sessions work
-  const cleanEnv = { ...process.env, PATH: fullPath };
+  // Claude Code will read ~/.claude/settings.json for API configuration
+  const cleanEnv = { 
+    ...process.env, 
+    PATH: fullPath,
+  };
   delete cleanEnv.CLAUDECODE;
   delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 

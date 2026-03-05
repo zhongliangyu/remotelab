@@ -163,9 +163,12 @@ export function buildClaudeArgs(prompt, options = {}) {
     args.push('--dangerously-skip-permissions');
   }
 
-  if (options.model) {
+  if (options.model && !options.thinking) {
     args.push('--model', options.model);
   }
+  // Thinking: Claude Code enables extended thinking automatically on supported models.
+  // Do NOT override the model in thinking mode - let settings.json control it via ANTHROPIC_MODEL
+  // This allows Qianfan/GLM/Kimi backends to work correctly
   if (options.thinking) {
     args.push('--effort', 'high');
   }
