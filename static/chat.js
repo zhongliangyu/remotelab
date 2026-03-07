@@ -437,6 +437,19 @@
       case "error":
         console.error("WS error:", msg.message);
         break;
+
+      case "auto_compact":
+        // Auto-compact triggered: switch to new session
+        console.log("Auto-compact:", msg.message);
+        if (msg.newSession) {
+          // Add new session to list
+          const exists = sessions.find((s) => s.id === msg.newSession.id);
+          if (!exists) sessions.push(msg.newSession);
+          renderSessionList();
+          // Switch to new session (archive old one will be done by user)
+          attachSession(msg.newSession.id, msg.newSession);
+        }
+        break;
     }
   }
 

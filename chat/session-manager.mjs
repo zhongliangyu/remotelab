@@ -206,6 +206,11 @@ export function sendMessage(sessionId, text, images, options = {}) {
     liveSessions.set(sessionId, live);
   }
 
+  // Track current message for potential auto-compact retry
+  live.pendingUserMessage = { text, images: savedImages, options: { ...options, tool: effectiveTool } };
+  live.hasAssistantMessage = false;
+  live.lastUsage = null;
+
   console.log(`[session-mgr] live state: status=${live.status}, hasRunner=${!!live.runner}, claudeSessionId=${live.claudeSessionId || 'none'}, codexThreadId=${live.codexThreadId || 'none'}, listeners=${live.listeners.size}`);
 
   // If tool was switched, clear resume IDs (they are tool-specific)
@@ -234,6 +239,16 @@ export function sendMessage(sessionId, text, images, options = {}) {
 
   const onEvent = (evt) => {
     console.log(`[session-mgr] onEvent session=${sessionId.slice(0,8)} type=${evt.type} content=${(evt.content || evt.toolName || '').slice(0, 80)}`);
+
+    // Track assistant messages for auto-compact detection
+    if (evt.type === 'message' && evt.role === 'assistant') {
+      live.hasAssistantMessage = true;
+    }
+    // Track usage events for context limit detection
+    if (evt.type === 'usage') {
+      live.lastUsage = evt;
+    }
+
     appendEvent(sessionId, evt);
     broadcast(sessionId, { type: 'event', event: evt });
   };
@@ -275,6 +290,40 @@ export function sendMessage(sessionId, text, images, options = {}) {
       appendEvent(sessionId, compactEvt);
       broadcast(sessionId, { type: 'event', event: compactEvt });
       return; // skip triggerSummary and push for compact ops
+    }
+
+    // Auto-compact detection:
+    // Case 1: No assistant message + input limit exceeded (model rejected)
+    // Case 2: Total tokens (input + output) exceeded limit (preemptive compact)
+    const usage = l?.lastUsage;
+    if (l && usage) {
+      const inputExceeded = isContextLimitExceeded(usage.inputTokens);
+      const totalExceeded = isContextLimitExceeded((usage.inputTokens || 0) + (usage.outputTokens || 0));
+      const noResponse = !l.hasAssistantMessage;
+
+      if ((noResponse && inputExceeded) || totalExceeded) {
+        const reason = noResponse && inputExceeded
+          ? `no response + input limit (${Math.round(usage.inputTokens / 1000)}K tokens)`
+          : `total tokens limit (${Math.round((usage.inputTokens + (usage.outputTokens || 0)) / 1000)}K tokens)`;
+        console.log(`[session-mgr] Auto-compact triggered: ${reason}`);
+
+        const pending = l.pendingUserMessage;
+        if (pending) {
+          // Notify user about auto-compact
+          const notifyEvt = statusEvent(`Context limit exceeded. Auto-compacting...`);
+          appendEvent(sessionId, notifyEvt);
+          broadcast(sessionId, { type: 'event', event: notifyEvt });
+
+          // Trigger auto-compact (async, don't await)
+          autoCompactAndContinue(sessionId, pending.text, pending.images, pending.options);
+          return;
+        }
+      }
+    }
+
+    // Clear pending message tracking
+    if (l) {
+      l.pendingUserMessage = null;
     }
 
     // Trigger async summary: always run for auto-rename, sidebar update only when progress is enabled
@@ -393,6 +442,9 @@ export function dropToolUse(sessionId) {
 
 const COMPACT_PROMPT = `Please write a concise summary of our conversation to preserve context for continuation. Include: main task/goal, key decisions made, current state of work, and any important next steps. Wrap your summary in <summary></summary> tags.`;
 
+// Context limit threshold (95% of 200K)
+const CONTEXT_LIMIT_THRESHOLD = 190000;
+
 /**
  * Compact: sends a summarization request to the model.
  * After the model responds, the session is reset and the summary becomes
@@ -413,6 +465,55 @@ export function compactSession(sessionId) {
   live.pendingCompact = true;
   sendMessage(sessionId, COMPACT_PROMPT, [], {});
   return true;
+}
+
+/**
+ * Auto-compact: triggered when context exceeds limit.
+ * Creates a new session with compressed context + pending message.
+ */
+async function autoCompactAndContinue(sessionId, pendingMessage, pendingImages, options) {
+  const session = getSession(sessionId);
+  if (!session) return false;
+
+  console.log(`[session-mgr] Auto-compacting session ${sessionId.slice(0,8)} due to context limit`);
+
+  // Step 1: Drop tools to reduce context
+  dropToolUse(sessionId);
+
+  // Step 2: Create new session with same folder/tool
+  const newSession = createSession(session.folder, session.tool, `${session.name} (continued)`);
+
+  let live = liveSessions.get(newSession.id);
+  if (!live) {
+    live = { status: 'idle', runner: null, listeners: new Set() };
+    liveSessions.set(newSession.id, live);
+  }
+
+  // Step 3: Build compressed context from dropToolUse result
+  const oldLive = liveSessions.get(sessionId);
+  if (oldLive?.compactContext) {
+    live.compactContext = oldLive.compactContext;
+  }
+
+  // Step 4: Broadcast new session to subscribers
+  broadcast(sessionId, {
+    type: 'auto_compact',
+    oldSessionId: sessionId,
+    newSession: { ...newSession, status: 'idle' },
+    message: 'Context limit exceeded. Created new session with compressed context.',
+  });
+
+  // Step 5: Send the pending message to new session
+  sendMessage(newSession.id, pendingMessage, pendingImages, options);
+
+  return true;
+}
+
+/**
+ * Check if usage indicates context limit exceeded.
+ */
+function isContextLimitExceeded(inputTokens) {
+  return inputTokens > CONTEXT_LIMIT_THRESHOLD;
 }
 
 /**

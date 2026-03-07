@@ -20,126 +20,138 @@ export function createClaudeAdapter() {
   // input_tokens + cache_creation_input_tokens + cache_read_input_tokens
   let lastTurnInputTokens = 0;
 
-  return {
-    parseLine(line) {
-      const trimmed = line.trim();
-      if (!trimmed) return [];
+    // Track if we've emitted usage for this turn
+    let usageEmitted = false;
 
-      let obj;
-      try {
-        obj = JSON.parse(trimmed);
-      } catch {
-        return [];
-      }
+    return {
+      parseLine(line) {
+        const trimmed = line.trim();
+        if (!trimmed) return [];
 
-      const events = [];
+        let obj;
+        try {
+          obj = JSON.parse(trimmed);
+        } catch {
+          return [];
+        }
 
-      switch (obj.type) {
-        case 'system':
-          events.push(statusEvent(obj.subtype === 'init'
-            ? `Session started (${obj.session_id || 'unknown'})`
-            : `System: ${obj.subtype || 'unknown'}`));
-          break;
+        const events = [];
 
-        case 'assistant': {
-          // Complete assistant message — the authoritative source for text & tool_use
-          const content = obj.message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'text') {
-                events.push(messageEvent('assistant', block.text));
-              } else if (block.type === 'thinking') {
-                events.push(reasoningEvent(block.thinking));
-              } else if (block.type === 'tool_use') {
-                events.push(toolUseEvent(
-                  block.name,
-                  typeof block.input === 'string'
-                    ? block.input
-                    : JSON.stringify(block.input, null, 2),
-                ));
-              } else if (block.type === 'tool_result') {
-                const output = typeof block.content === 'string'
-                  ? block.content
-                  : Array.isArray(block.content)
-                    ? block.content.map(c => c.text || '').join('\n')
-                    : JSON.stringify(block.content);
-                events.push(toolResultEvent(block.tool_use_id || '', output));
+        switch (obj.type) {
+          case 'system':
+            events.push(statusEvent(obj.subtype === 'init'
+              ? `Session started (${obj.session_id || 'unknown'})`
+              : `System: ${obj.subtype || 'unknown'}`));
+            break;
+
+          case 'assistant': {
+            // Complete assistant message — the authoritative source for text & tool_use
+            const content = obj.message?.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === 'text') {
+                  events.push(messageEvent('assistant', block.text));
+                } else if (block.type === 'thinking') {
+                  events.push(reasoningEvent(block.thinking));
+                } else if (block.type === 'tool_use') {
+                  events.push(toolUseEvent(
+                    block.name,
+                    typeof block.input === 'string'
+                      ? block.input
+                      : JSON.stringify(block.input, null, 2),
+                  ));
+                } else if (block.type === 'tool_result') {
+                  const output = typeof block.content === 'string'
+                    ? block.content
+                    : Array.isArray(block.content)
+                      ? block.content.map(c => c.text || '').join('\n')
+                      : JSON.stringify(block.content);
+                  events.push(toolResultEvent(block.tool_use_id || '', output));
+                }
               }
             }
+            // Track per-turn input tokens (including cached) for context display
+            const msgUsage = obj.message?.usage;
+            if (msgUsage) {
+              lastTurnInputTokens =
+                (msgUsage.input_tokens || 0) +
+                (msgUsage.cache_creation_input_tokens || 0) +
+                (msgUsage.cache_read_input_tokens || 0);
+              usageEmitted = false; // Reset - new turn started
+            }
+            break;
           }
-          // Track per-turn input tokens (including cached) for context display
-          const msgUsage = obj.message?.usage;
-          if (msgUsage) {
-            lastTurnInputTokens =
-              (msgUsage.input_tokens || 0) +
-              (msgUsage.cache_creation_input_tokens || 0) +
-              (msgUsage.cache_read_input_tokens || 0);
-          }
-          break;
-        }
 
-        case 'user': {
-          // Tool results returned to the model
-          const content = obj.message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'tool_result') {
-                const output = typeof block.content === 'string'
-                  ? block.content
-                  : Array.isArray(block.content)
-                    ? block.content.map(c => c.text || '').join('\n')
-                    : JSON.stringify(block.content);
-                events.push(toolResultEvent(
-                  block.tool_use_id || '',
-                  output,
-                  block.is_error ? 1 : 0,
-                ));
+          case 'user': {
+            // Tool results returned to the model
+            const content = obj.message?.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === 'tool_result') {
+                  const output = typeof block.content === 'string'
+                    ? block.content
+                    : Array.isArray(block.content)
+                      ? block.content.map(c => c.text || '').join('\n')
+                      : JSON.stringify(block.content);
+                  events.push(toolResultEvent(
+                    block.tool_use_id || '',
+                    output,
+                    block.is_error ? 1 : 0,
+                  ));
+                }
               }
             }
+            break;
           }
-          break;
+
+          case 'result':
+            // Skip obj.result text — it duplicates the last assistant message.
+            // Only emit usage + completed status.
+            if (obj.cost_usd !== undefined || obj.usage) {
+              const u = obj.usage || {};
+              // Use per-turn input tokens tracked from the last assistant message,
+              // which includes cached tokens. Fall back to summing the result event's fields.
+              const totalIn = lastTurnInputTokens || (
+                (u.input_tokens || 0) +
+                (u.cache_creation_input_tokens || 0) +
+                (u.cache_read_input_tokens || 0)
+              );
+              events.push(usageEvent(totalIn, u.output_tokens || 0));
+              usageEmitted = true;
+            }
+            events.push(statusEvent('completed'));
+            break;
+
+          case 'stream_event': {
+            // Only extract thinking deltas from streaming events.
+            // Text and tool_use are handled via complete "assistant" messages above.
+            const evt = obj.event;
+            if (!evt) break;
+            if (evt.type === 'content_block_delta' && evt.delta?.type === 'thinking_delta') {
+              events.push(reasoningEvent(evt.delta.thinking || ''));
+            }
+            break;
+          }
+
+          default:
+            break;
         }
 
-        case 'result':
-          // Skip obj.result text — it duplicates the last assistant message.
-          // Only emit usage + completed status.
-          if (obj.cost_usd !== undefined || obj.usage) {
-            const u = obj.usage || {};
-            // Use per-turn input tokens tracked from the last assistant message,
-            // which includes cached tokens. Fall back to summing the result event's fields.
-            const totalIn = lastTurnInputTokens || (
-              (u.input_tokens || 0) +
-              (u.cache_creation_input_tokens || 0) +
-              (u.cache_read_input_tokens || 0)
-            );
-            events.push(usageEvent(totalIn, u.output_tokens || 0));
-          }
-          events.push(statusEvent('completed'));
-          break;
+        return events;
+      },
 
-        case 'stream_event': {
-          // Only extract thinking deltas from streaming events.
-          // Text and tool_use are handled via complete "assistant" messages above.
-          const evt = obj.event;
-          if (!evt) break;
-          if (evt.type === 'content_block_delta' && evt.delta?.type === 'thinking_delta') {
-            events.push(reasoningEvent(evt.delta.thinking || ''));
-          }
-          break;
+      // Called when the process exits - emit usage if not already done
+      flush() {
+        const events = [];
+        // If we tracked tokens but no result event was seen, emit usage now
+        if (lastTurnInputTokens > 0 && !usageEmitted) {
+          events.push(usageEvent(lastTurnInputTokens, 0));
+          usageEmitted = true;
         }
-
-        default:
-          break;
-      }
-
-      return events;
-    },
-
-    flush() {
-      return [];
-    },
-  };
-}
+        return events;
+      },
+    };
+  }
 
 /**
  * Build the command-line arguments for spawning Claude Code.
