@@ -138,6 +138,80 @@ function createRequestId() {
   return `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function resetRenderedEventState(sessionId = null) {
+  renderedEventState.sessionId = sessionId;
+  renderedEventState.latestSeq = 0;
+  renderedEventState.eventCount = 0;
+}
+
+function getLatestEventSeq(events) {
+  let latestSeq = 0;
+  for (const event of events || []) {
+    if (Number.isInteger(event?.seq) && event.seq > latestSeq) {
+      latestSeq = event.seq;
+    }
+  }
+  return latestSeq;
+}
+
+function updateRenderedEventState(sessionId, events) {
+  renderedEventState.sessionId = sessionId;
+  renderedEventState.latestSeq = getLatestEventSeq(events);
+  renderedEventState.eventCount = Array.isArray(events) ? events.length : 0;
+}
+
+function getEventRenderPlan(sessionId, events) {
+  const normalizedEvents = Array.isArray(events) ? events : [];
+  const latestSeq = getLatestEventSeq(normalizedEvents);
+  const sameSession = renderedEventState.sessionId === sessionId;
+  const hasRenderedSnapshot = sameSession && (
+    renderedEventState.eventCount > 0
+    || emptyState.parentNode === messagesInner
+  );
+
+  if (!sameSession || !hasRenderedSnapshot) {
+    return { mode: "reset", events: normalizedEvents };
+  }
+
+  if (
+    latestSeq < renderedEventState.latestSeq ||
+    normalizedEvents.length < renderedEventState.eventCount
+  ) {
+    return { mode: "reset", events: normalizedEvents };
+  }
+
+  if (
+    latestSeq === renderedEventState.latestSeq &&
+    normalizedEvents.length === renderedEventState.eventCount
+  ) {
+    return { mode: "noop", events: [] };
+  }
+
+  const appendedEvents = normalizedEvents.filter(
+    (event) => Number.isInteger(event?.seq) && event.seq > renderedEventState.latestSeq,
+  );
+
+  if (appendedEvents.length === 0) {
+    return { mode: "reset", events: normalizedEvents };
+  }
+
+  if (appendedEvents[0].seq !== renderedEventState.latestSeq + 1) {
+    return { mode: "reset", events: normalizedEvents };
+  }
+
+  return { mode: "append", events: appendedEvents };
+}
+
+function reconcilePendingMessageState(event) {
+  if (event?.type !== "message" || event.role !== "user") return;
+  const optimistic = document.getElementById("optimistic-msg");
+  if (optimistic) optimistic.remove();
+  const pending = getPendingMessage();
+  if (pending && (!pending.requestId || pending.requestId === event.requestId)) {
+    clearPendingMessage();
+  }
+}
+
 function upsertSession(session) {
   if (!session?.id) return null;
   const previous = sessions.find((entry) => entry.id === session.id);
@@ -227,23 +301,34 @@ async function fetchSessionEvents(sessionId) {
   );
   const events = data.events || [];
   if (currentSessionId !== sessionId) return events;
-  clearMessages();
-  if (events.length === 0) {
-    showEmpty();
-  }
-  for (const event of events) {
-    if (event.type === "message" && event.role === "user") {
-      const optimistic = document.getElementById("optimistic-msg");
-      if (optimistic) optimistic.remove();
-      const pending = getPendingMessage();
-      if (pending && (!pending.requestId || pending.requestId === event.requestId)) {
-        clearPendingMessage();
-      }
+  const renderPlan = getEventRenderPlan(sessionId, events);
+
+  if (renderPlan.mode === "reset") {
+    clearMessages();
+    if (events.length === 0) {
+      showEmpty();
     }
-    renderEvent(event, false);
+    for (const event of events) {
+      reconcilePendingMessageState(event);
+      renderEvent(event, false);
+    }
+    updateRenderedEventState(sessionId, events);
+    if (events.length > 0 && shouldStickToBottom) scrollToBottom();
+    checkPendingMessage(events);
+    return events;
   }
-  if (events.length > 0 && shouldStickToBottom) scrollToBottom();
-  checkPendingMessage(events);
+
+  if (renderPlan.mode === "append") {
+    for (const event of renderPlan.events) {
+      reconcilePendingMessageState(event);
+      renderEvent(event, false);
+    }
+    updateRenderedEventState(sessionId, events);
+    if (renderPlan.events.length > 0 && shouldStickToBottom) scrollToBottom();
+    return renderPlan.events;
+  }
+
+  updateRenderedEventState(sessionId, events);
   return events;
 }
 

@@ -105,6 +105,11 @@ let selectedTool = preferredTool;
 // Default thinking to enabled; only disable if explicitly set to 'false'
 let thinkingEnabled = localStorage.getItem("thinkingEnabled") !== "false";
 // Model/effort are stored per-tool: "selectedModel_claude", "selectedModel_codex"
+const renderedEventState = {
+  sessionId: null,
+  latestSeq: 0,
+  eventCount: 0,
+};
 let selectedModel = null;
 let selectedEffort = null;
 let currentToolModels = []; // model list for current tool

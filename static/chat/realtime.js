@@ -271,6 +271,7 @@ function updateStatus(connState, sessState, renameState, archived = false) {
 
 // ---- Message rendering ----
 function clearMessages() {
+  resetRenderedEventState();
   messagesInner.innerHTML = "";
   // Reset thinking block state
   inThinkingBlock = false;
