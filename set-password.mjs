@@ -2,7 +2,7 @@
 import { createInterface } from 'readline';
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname } from 'path';
-import { hashPassword } from './lib/auth.mjs';
+import { hashPasswordAsync } from './lib/auth.mjs';
 import { AUTH_FILE } from './lib/config.mjs';
 
 const authFile = AUTH_FILE;
@@ -37,7 +37,7 @@ if (await pathExists(authFile)) {
 }
 
 existing.username = username;
-existing.passwordHash = hashPassword(password);
+existing.passwordHash = await hashPasswordAsync(password);
 
 await writeFile(authFile, JSON.stringify(existing, null, 2), 'utf8');
 console.log(`Password set for user "${username}".`);
