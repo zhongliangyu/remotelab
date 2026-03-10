@@ -1,5 +1,30 @@
 'use strict';
 
+async function clearLegacyCaches() {
+  const cacheNames = await self.caches.keys();
+  await Promise.all(cacheNames.map((cacheName) => self.caches.delete(cacheName)));
+}
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(clearLegacyCaches());
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    await clearLegacyCaches();
+    if (self.registration.navigationPreload) {
+      await self.registration.navigationPreload.disable().catch(() => {});
+    }
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'remotelab:clear-caches') return;
+  event.waitUntil(clearLegacyCaches());
+});
+
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch {}

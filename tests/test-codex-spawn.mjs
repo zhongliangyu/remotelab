@@ -3,7 +3,7 @@
  * Test script: spawns codex exec --json --full-auto exactly like process-runner.mjs does,
  * to diagnose if Codex stops mid-execution.
  *
- * Usage: node test-codex-spawn.mjs [prompt]
+ * Usage: node tests/test-codex-spawn.mjs [prompt]
  */
 import { spawn, execFileSync } from 'child_process';
 import { createInterface } from 'readline';

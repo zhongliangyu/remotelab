@@ -5,10 +5,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFile
 import { homedir, tmpdir } from 'os';
 import { dirname, join, relative } from 'path';
 import { fileURLToPath } from 'url';
+import { AUTH_FILE, CHAT_PORT } from '../lib/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 const MARKER = '<!-- remotelab-github-auto-triage -->';
+const DEFAULT_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`;
+const DEFAULT_SESSION_TOOL = 'codex';
+const REQUEST_MARKER_PREFIX = '<!-- remotelab-github-request-id:';
 
 const STOP_WORDS_EN = new Set([
   'about', 'after', 'again', 'also', 'been', 'being', 'both', 'from', 'have', 'just', 'more',
@@ -35,6 +39,12 @@ function usage(exitCode = 0) {
 Options:
   --repo <owner/repo>         GitHub repository to watch
   --post                      Actually post replies instead of dry-run
+  --chat-base-url <url>       RemoteLab base URL (default: ${DEFAULT_CHAT_BASE_URL})
+  --session-folder <path>     Folder used for RemoteLab sessions (default: ${PROJECT_ROOT})
+  --session-tool <tool>       Tool used for RemoteLab sessions (default: ${DEFAULT_SESSION_TOOL})
+  --model <id>                Optional model override for submitted messages
+  --effort <level>            Optional effort override for submitted messages
+  --thinking                  Enable thinking for submitted messages
   --bootstrap-hours <hours>   Lookback window on first run (default: 72)
   --limit <count>             Max updated items to inspect per run (default: 20)
   --max-comments <count>      Max issue comments kept in snapshot (default: 20)
@@ -50,7 +60,8 @@ Options:
 Behavior:
   - Polls GitHub issues + PRs by updated time through gh api
   - Writes local intake snapshots for each changed thread
-  - Drafts a context-aware first response with initial troubleshooting / product-direction guidance
+  - Normalizes each inbound update into a RemoteLab session message
+  - Reads the resulting assistant message back from RemoteLab and publishes it to GitHub
   - Scheduled runs remain conservative by default and do not auto-reply to maintainer-authored threads
 `;
   console.log(message);
@@ -61,6 +72,12 @@ function parseArgs(argv) {
   const options = {
     repo: '',
     post: false,
+    chatBaseUrl: DEFAULT_CHAT_BASE_URL,
+    sessionFolder: PROJECT_ROOT,
+    sessionTool: DEFAULT_SESSION_TOOL,
+    model: '',
+    effort: '',
+    thinking: false,
     bootstrapHours: 72,
     limit: 20,
     maxComments: 20,
@@ -82,6 +99,35 @@ function parseArgs(argv) {
     }
     if (arg === '--post') {
       options.post = true;
+      continue;
+    }
+    if (arg === '--chat-base-url') {
+      options.chatBaseUrl = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--session-folder') {
+      options.sessionFolder = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--session-tool') {
+      options.sessionTool = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--model') {
+      options.model = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--effort') {
+      options.effort = argv[index + 1] || '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--thinking') {
+      options.thinking = true;
       continue;
     }
     if (arg === '--bootstrap-hours') {
@@ -138,6 +184,18 @@ function parseArgs(argv) {
   }
 
   if (!options.repo) usage(1);
+  if (!options.chatBaseUrl) {
+    console.error('[triage] --chat-base-url requires a value');
+    process.exit(1);
+  }
+  if (!options.sessionFolder) {
+    console.error('[triage] --session-folder requires a value');
+    process.exit(1);
+  }
+  if (!options.sessionTool) {
+    console.error('[triage] --session-tool requires a value');
+    process.exit(1);
+  }
   if (options.forceDraft && options.post) {
     console.error('[triage] --force-draft is a preview-only mode and cannot be combined with --post');
     process.exit(1);
@@ -198,6 +256,73 @@ function configRoot() {
   const xdgConfigHome = process.env.XDG_CONFIG_HOME;
   const base = xdgConfigHome || join(homedir(), '.config');
   return join(base, 'remotelab', 'github-triage');
+}
+
+function trimString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeBaseUrl(baseUrl) {
+  const normalized = trimString(baseUrl);
+  if (!normalized) {
+    throw new Error('chat base URL is required');
+  }
+  return normalized.replace(/\/+$/, '');
+}
+
+function readOwnerToken() {
+  const auth = JSON.parse(readFileSync(AUTH_FILE, 'utf8'));
+  const token = trimString(auth?.token);
+  if (!token) {
+    throw new Error(`No owner token found in ${AUTH_FILE}`);
+  }
+  return token;
+}
+
+async function loginWithToken(baseUrl, token) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/?token=${encodeURIComponent(token)}`, {
+    redirect: 'manual',
+  });
+  const setCookie = response.headers.get('set-cookie');
+  if (response.status !== 302 || !setCookie) {
+    throw new Error(`Failed to authenticate to RemoteLab at ${baseUrl} (status ${response.status})`);
+  }
+  return setCookie.split(';')[0];
+}
+
+async function requestJson(baseUrl, path, { method = 'GET', cookie, body } = {}) {
+  const headers = {
+    Accept: 'application/json',
+  };
+  if (cookie) headers.Cookie = cookie;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    redirect: 'manual',
+  });
+
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {}
+
+  return { response, json, text };
+}
+
+function sanitizeIdPart(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'unknown';
 }
 
 function sanitizeRepo(repo) {
@@ -790,6 +915,8 @@ function collectEvents(item, issueComments, pullRequestReviews, maintainers) {
       timestamp: item.created_at,
       external: !isMaintainer(item.user.login, maintainers),
       body: item.body || '',
+      externalId: item.id || `${item.number}:${item.created_at}`,
+      url: item.html_url || '',
     });
   }
 
@@ -802,6 +929,8 @@ function collectEvents(item, issueComments, pullRequestReviews, maintainers) {
       timestamp,
       external: !isMaintainer(comment.user?.login || '', maintainers),
       body: comment.body || '',
+      externalId: comment.id || `${comment.user?.login || 'unknown'}:${timestamp}`,
+      url: comment.html_url || '',
     });
   }
 
@@ -815,6 +944,8 @@ function collectEvents(item, issueComments, pullRequestReviews, maintainers) {
       external: !isMaintainer(review.user?.login || '', maintainers),
       body: review.body || '',
       state: review.state || '',
+      externalId: review.id || `${review.user?.login || 'unknown'}:${timestamp}`,
+      url: review.html_url || '',
     });
   }
 
@@ -846,6 +977,19 @@ function defaultSkipReason(item, latestExternalActivity, maintainers, latestTagg
   return 'no external activity';
 }
 
+function requestMarker(requestId) {
+  return `${REQUEST_MARKER_PREFIX} ${requestId} -->`;
+}
+
+function commentIncludesRequestId(body, requestId) {
+  return trimString(body).includes(requestMarker(requestId));
+}
+
+function renderPostedComment(body, requestId) {
+  const trimmed = trimString(body);
+  return [trimmed, '', MARKER, requestMarker(requestId)].filter(Boolean).join('\n');
+}
+
 function buildSnapshot(item, issueComments, pullRequestReviews, details) {
   const sections = [];
   sections.push('# GitHub intake snapshot');
@@ -863,6 +1007,14 @@ function buildSnapshot(item, issueComments, pullRequestReviews, details) {
   sections.push(`- Latest maintainer activity: ${formatEvent(details.latestMaintainerActivity)}`);
   sections.push(`- Latest tagged auto-reply: ${details.latestTaggedReplyAt || 'none'}`);
   sections.push(`- Last action: ${details.actionLabel}`);
+  if (details.automation) {
+    sections.push(`- Automation status: ${details.automation.status || 'none'}`);
+    sections.push(`- Session: ${details.automation.sessionId || 'none'}`);
+    sections.push(`- Run: ${details.automation.runId || 'none'}`);
+    sections.push(`- Request ID: ${details.automation.requestId || 'none'}`);
+    sections.push(`- Event key: ${details.automation.eventKey || 'none'}`);
+    sections.push(`- Last error: ${details.automation.lastError || 'none'}`);
+  }
   sections.push('');
   sections.push('## Title');
   sections.push('');
@@ -924,10 +1076,14 @@ function buildSnapshot(item, issueComments, pullRequestReviews, details) {
 
 function writeSnapshot(snapshotDir, item, content) {
   ensureDir(snapshotDir);
-  const kind = item.pull_request ? 'pr' : 'issue';
-  const pathname = join(snapshotDir, `${kind}-${item.number}.md`);
+  const pathname = snapshotPath(snapshotDir, item);
   writeFileSync(pathname, content);
   return pathname;
+}
+
+function snapshotPath(snapshotDir, item) {
+  const kind = item.pull_request ? 'pr' : 'issue';
+  return join(snapshotDir, `${kind}-${item.number}.md`);
 }
 
 function postIssueComment(repo, number, body) {
@@ -946,17 +1102,409 @@ function overlapSince(lastPollAt) {
   return new Date(Math.max(0, parsed - 60 * 1000)).toISOString();
 }
 
+function buildExternalTriggerId(repo, item) {
+  return `github:${repo}#${item.number}`;
+}
+
+function buildSessionName(repo, item) {
+  const title = trimString(item.title);
+  return title ? `GitHub: ${repo}#${item.number} — ${title}` : `GitHub: ${repo}#${item.number}`;
+}
+
+function buildSessionDescription(repo, item, kind) {
+  const noun = kind === 'pr' ? 'pull request' : 'issue';
+  const title = trimString(item.title);
+  return title
+    ? `GitHub ${noun} ${repo}#${item.number}: ${title}`
+    : `GitHub ${noun} ${repo}#${item.number}`;
+}
+
+function buildSessionSystemPrompt() {
+  return [
+    'You are replying through the RemoteLab GitHub connector.',
+    'Return only the exact GitHub comment body that should be posted back to the thread.',
+    'Do not add surrounding explanation, connector notes, session ids, or hidden HTML markers.',
+    'Use concise, actionable maintainer language.',
+    'Match the thread language when practical.',
+    'If the inbound message says "Maintainer Test: yes", briefly confirm the GitHub -> RemoteLab bridge worked and mention what was processed.',
+  ].join('\n');
+}
+
+function formatContextPointer(entry) {
+  const suffix = entry.heading && entry.heading !== 'Overview' ? ` / ${entry.heading}` : '';
+  return `- ${entry.relPath}${suffix}`;
+}
+
+function buildRemoteLabMessage({
+  repo,
+  item,
+  kind,
+  replyMode,
+  classification,
+  relevantContext,
+  snapshotFile,
+  latestExternalActivity,
+  maintainerTest,
+}) {
+  const latestBody = trimString(latestExternalActivity?.body) || trimString(item.body);
+  const latestActor = trimString(latestExternalActivity?.actor) || trimString(item.user?.login);
+  const activityUrl = trimString(latestExternalActivity?.url);
+  const contextPointers = relevantContext.length > 0
+    ? relevantContext.map(formatContextPointer).join('\n')
+    : '(none)';
+
+  return [
+    'Source: GitHub',
+    `Kind: ${latestExternalActivity?.source || (maintainerTest ? 'maintainer_test' : 'opened')}`,
+    `Repo: ${repo}`,
+    `Thread: ${repo}#${item.number}`,
+    `Thread Type: ${kind}`,
+    `Title: ${emptyText(item.title)}`,
+    `Thread URL: ${item.html_url}`,
+    `Actor: @${latestActor || 'unknown'}`,
+    `Activity At: ${latestExternalActivity?.timestamp || item.updated_at || item.created_at || nowIso()}`,
+    activityUrl ? `Activity URL: ${activityUrl}` : '',
+    `Reply Mode: ${replyMode}`,
+    `Maintainer Test: ${maintainerTest ? 'yes' : 'no'}`,
+    `Classification: ${classification}`,
+    `Snapshot File: ${snapshotFile}`,
+    '',
+    'Latest user message:',
+    emptyText(latestBody),
+    '',
+    'Relevant local context pointers:',
+    contextPointers,
+    '',
+    'Task:',
+    '- Inspect the repo and the snapshot file as needed.',
+    '- Write the exact GitHub comment body to post back to the thread.',
+    '- Be concrete, concise, and helpful.',
+    '- Do not mention hidden connector/session/run implementation details.',
+  ].filter(Boolean).join('\n');
+}
+
+function buildEventKey(repo, item, latestExternalActivity, replyMode) {
+  const safeRepo = sanitizeRepo(repo);
+  const stableTimestamp = item.updated_at || item.created_at || nowIso();
+  if (replyMode === 'forced_draft') {
+    return `github:${safeRepo}:${item.number}:forced_draft:${sanitizeIdPart(stableTimestamp)}`;
+  }
+  if (replyMode === 'maintainer_test') {
+    return `github:${safeRepo}:${item.number}:maintainer_test:${sanitizeIdPart(stableTimestamp)}`;
+  }
+  const source = sanitizeIdPart(latestExternalActivity?.source || 'opened');
+  const activityId = sanitizeIdPart(latestExternalActivity?.externalId || latestExternalActivity?.timestamp || stableTimestamp);
+  return `github:${safeRepo}:${item.number}:${source}:${activityId}`;
+}
+
+function buildRequestId(eventKey) {
+  return eventKey;
+}
+
+function findPublishedComment(issueComments, requestId) {
+  return issueComments.find((comment) => commentIncludesRequestId(comment.body || '', requestId)) || null;
+}
+
+async function loadAssistantReply(baseUrl, sessionId, runId, requestId, cookie) {
+  const eventsResult = await requestJson(baseUrl, `/api/sessions/${sessionId}/events`, { cookie });
+  if (!eventsResult.response.ok || !Array.isArray(eventsResult.json?.events)) {
+    throw new Error(eventsResult.json?.error || eventsResult.text || `Failed to load session events for ${sessionId}`);
+  }
+
+  const candidate = [...eventsResult.json.events].reverse().find((event) => (
+    event.type === 'message'
+    && event.role === 'assistant'
+    && ((runId && event.runId === runId) || (requestId && event.requestId === requestId))
+  ));
+  if (!candidate) return null;
+
+  if (candidate.bodyAvailable && candidate.bodyLoaded === false) {
+    const bodyResult = await requestJson(baseUrl, `/api/sessions/${sessionId}/events/${candidate.seq}/body`, { cookie });
+    if (bodyResult.response.ok && bodyResult.json?.body?.value !== undefined) {
+      candidate.content = bodyResult.json.body.value;
+      candidate.bodyLoaded = true;
+    }
+  }
+
+  return candidate;
+}
+
+async function submitInboundUpdate(
+  options,
+  item,
+  kind,
+  replyMode,
+  classification,
+  relevantContext,
+  latestExternalActivity,
+  snapshotFile,
+  maintainerTest,
+  cookie,
+) {
+  const externalTriggerId = buildExternalTriggerId(options.repo, item);
+  const eventKey = buildEventKey(options.repo, item, latestExternalActivity, replyMode);
+  const requestId = buildRequestId(eventKey);
+
+  const sessionPayload = {
+    folder: options.sessionFolder,
+    tool: options.sessionTool,
+    name: buildSessionName(options.repo, item),
+    group: 'GitHub',
+    description: buildSessionDescription(options.repo, item, kind),
+    systemPrompt: buildSessionSystemPrompt(),
+    externalTriggerId,
+  };
+  const createResult = await requestJson(options.chatBaseUrl, '/api/sessions', {
+    method: 'POST',
+    cookie,
+    body: sessionPayload,
+  });
+  if (!createResult.response.ok || !createResult.json?.session?.id) {
+    throw new Error(createResult.json?.error || createResult.text || `Failed to create session (${createResult.response.status})`);
+  }
+
+  const session = createResult.json.session;
+  const messagePayload = {
+    requestId,
+    text: buildRemoteLabMessage({
+      repo: options.repo,
+      item,
+      kind,
+      replyMode,
+      classification,
+      relevantContext,
+      snapshotFile,
+      latestExternalActivity,
+      maintainerTest,
+    }),
+    tool: options.sessionTool,
+    thinking: options.thinking === true,
+  };
+  if (trimString(options.model)) messagePayload.model = trimString(options.model);
+  if (trimString(options.effort)) messagePayload.effort = trimString(options.effort);
+
+  const submitResult = await requestJson(options.chatBaseUrl, `/api/sessions/${session.id}/messages`, {
+    method: 'POST',
+    cookie,
+    body: messagePayload,
+  });
+  if (![200, 202].includes(submitResult.response.status) || !submitResult.json?.run?.id) {
+    throw new Error(submitResult.json?.error || submitResult.text || `Failed to submit session message (${submitResult.response.status})`);
+  }
+
+  return {
+    status: 'processing_for_reply',
+    sessionId: session.id,
+    runId: submitResult.json.run.id,
+    requestId,
+    eventKey,
+    externalTriggerId,
+    publishRequested: options.post === true,
+    replyMode,
+    duplicate: submitResult.json?.duplicate === true,
+    submittedAt: nowIso(),
+    updatedAt: nowIso(),
+    lastError: null,
+  };
+}
+
+function shouldPublishReply(options, automation) {
+  if (!automation) return false;
+  if (automation.publishRequested === true) return true;
+  return options.post === true && automation.replyMode !== 'forced_draft';
+}
+
+async function reconcilePendingItem(options, itemState, cookie) {
+  const automation = itemState?.automation;
+  if (!automation || !['processing_for_reply', 'reply_ready', 'reply_failed'].includes(automation.status)) {
+    return null;
+  }
+  if (!automation.sessionId || !automation.runId || !automation.requestId) {
+    return {
+      automation: {
+        ...(automation || {}),
+        status: 'reply_failed',
+        lastError: 'missing automation metadata',
+        updatedAt: nowIso(),
+      },
+      action: { mode: 'failed', reason: 'missing automation metadata' },
+      replyBody: trimString(automation?.replyBody),
+    };
+  }
+
+  const runResult = await requestJson(options.chatBaseUrl, `/api/runs/${automation.runId}`, { cookie });
+  if (!runResult.response.ok || !runResult.json?.run) {
+    throw new Error(runResult.json?.error || runResult.text || `Failed to load run ${automation.runId}`);
+  }
+
+  const run = runResult.json.run;
+  if (!['completed', 'failed', 'cancelled'].includes(run.state)) {
+    return {
+      automation: { ...automation, updatedAt: nowIso() },
+      action: { mode: 'processing', reason: `run ${run.state}` },
+      replyBody: trimString(automation.replyBody),
+    };
+  }
+
+  if (run.state !== 'completed') {
+    return {
+      automation: {
+        ...automation,
+        status: 'reply_failed',
+        lastError: `run ${run.state}`,
+        updatedAt: nowIso(),
+      },
+      action: { mode: 'failed', reason: `run ${run.state}` },
+      replyBody: trimString(automation.replyBody),
+    };
+  }
+
+  const replyEvent = await loadAssistantReply(
+    options.chatBaseUrl,
+    automation.sessionId,
+    automation.runId,
+    automation.requestId,
+    cookie,
+  );
+  const replyBody = trimString(replyEvent?.content);
+  if (!replyBody) {
+    return {
+      automation: {
+        ...automation,
+        status: 'reply_failed',
+        lastError: 'no assistant message found for completed run',
+        updatedAt: nowIso(),
+      },
+      action: { mode: 'failed', reason: 'no assistant message found for completed run' },
+      replyBody: trimString(automation.replyBody),
+    };
+  }
+
+  const readyAutomation = {
+    ...automation,
+    status: 'reply_ready',
+    replyBody,
+    replySeq: replyEvent?.seq || null,
+    readyAt: automation.readyAt || nowIso(),
+    lastError: null,
+    updatedAt: nowIso(),
+  };
+
+  if (!shouldPublishReply(options, readyAutomation)) {
+    return {
+      automation: readyAutomation,
+      action: { mode: 'dry-run', reason: 'reply ready' },
+      replyBody,
+    };
+  }
+
+  const existingComment = findPublishedComment(fetchIssueComments(options.repo, itemState.number), automation.requestId);
+  if (existingComment) {
+    return {
+      automation: {
+        ...readyAutomation,
+        status: 'reply_sent',
+        publishRequested: true,
+        commentUrl: existingComment.html_url || itemState.url,
+        publishedAt: existingComment.updated_at || existingComment.created_at || nowIso(),
+        updatedAt: nowIso(),
+      },
+      action: { mode: 'posted', commentUrl: existingComment.html_url || itemState.url },
+      replyBody,
+    };
+  }
+
+  const comment = postIssueComment(options.repo, itemState.number, renderPostedComment(replyBody, automation.requestId));
+  return {
+    automation: {
+      ...readyAutomation,
+      status: 'reply_sent',
+      publishRequested: true,
+      commentUrl: comment.html_url || itemState.url,
+      publishedAt: nowIso(),
+      updatedAt: nowIso(),
+    },
+    action: { mode: 'posted', commentUrl: comment.html_url || itemState.url },
+    replyBody,
+  };
+}
+
 function actionSummary(action) {
   if (action.mode === 'posted') return `posted at ${action.commentUrl}`;
-  if (action.mode === 'dry-run') return 'dry-run draft generated';
+  if (action.mode === 'submitted') return action.duplicate === true
+    ? `reused existing run ${action.runId}`
+    : `submitted to RemoteLab run ${action.runId}`;
+  if (action.mode === 'processing') return action.reason || 'waiting for RemoteLab run';
+  if (action.mode === 'dry-run') return 'RemoteLab reply ready (dry-run)';
+  if (action.mode === 'failed') return action.reason || 'automation failed';
   return action.reason;
 }
 
-function main() {
+function statusLabelForAction(action, needsReply) {
+  if (!action) return needsReply ? 'pending' : 'synced';
+  if (action.mode === 'posted') return 'posted';
+  if (action.mode === 'submitted') return action.duplicate === true ? 'reused-run' : 'submitted';
+  if (action.mode === 'processing') return action.reason || 'processing';
+  if (action.mode === 'dry-run') return 'draft-ready';
+  if (action.mode === 'failed') return `failed (${action.reason || 'unknown error'})`;
+  return needsReply ? action.mode : `synced (${action.reason})`;
+}
+
+async function reconcilePendingItems(options, state, resultMap, getCookie) {
+  for (const itemState of Object.values(state.items || {})) {
+    const automation = itemState?.automation;
+    if (!automation || !['processing_for_reply', 'reply_ready', 'reply_failed'].includes(automation.status)) {
+      continue;
+    }
+
+    try {
+      const outcome = await reconcilePendingItem(options, itemState, await getCookie());
+      if (!outcome) continue;
+      itemState.automation = outcome.automation;
+      itemState.lastAction = outcome.action;
+      resultMap.set(itemState.number, {
+        number: itemState.number,
+        kind: itemState.kind,
+        needsReply: true,
+        action: outcome.action,
+        snapshotFile: itemState.snapshotFile,
+        title: itemState.title,
+      });
+      if (outcome.action.mode !== 'processing' || options.verbose) {
+        console.log(`[triage] reconcile ${String(itemState.kind || 'issue').toUpperCase()} #${itemState.number} ${statusLabelForAction(outcome.action, true)}`);
+      }
+      if (outcome.action.mode === 'dry-run' && !options.post && outcome.replyBody) {
+        console.log(`\n[triage] Draft for #${itemState.number}:\n${outcome.replyBody}\n`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      itemState.automation = {
+        ...(itemState.automation || {}),
+        status: 'reply_failed',
+        lastError: message,
+        updatedAt: nowIso(),
+      };
+      itemState.lastAction = { mode: 'failed', reason: message };
+      resultMap.set(itemState.number, {
+        number: itemState.number,
+        kind: itemState.kind,
+        error: message,
+        title: itemState.title,
+        action: itemState.lastAction,
+        snapshotFile: itemState.snapshotFile,
+      });
+      console.error(`[triage] Failed to reconcile ${String(itemState.kind || 'issue').toUpperCase()} #${itemState.number}: ${message}`);
+    }
+  }
+}
+
+async function main() {
   const options = parseArgs(process.argv.slice(2));
+  options.chatBaseUrl = normalizeBaseUrl(options.chatBaseUrl);
   const paths = resolvePaths(options.repo, options);
   const state = readJson(paths.stateFile, { repo: options.repo, maintainers: [], lastPollAt: null, items: {} });
-  const maintainers = normalizeMaintainers(options.maintainers || state.maintainers.join(','));
+  if (!state.items || typeof state.items !== 'object') state.items = {};
+  const maintainers = normalizeMaintainers(options.maintainers || (Array.isArray(state.maintainers) ? state.maintainers.join(',') : ''));
   const maintainersLookup = maintainerSet(maintainers);
   const runStartedAt = new Date().toISOString();
   const sinceIso = overlapSince(state.lastPollAt) || new Date(Date.now() - options.bootstrapHours * 60 * 60 * 1000).toISOString();
@@ -965,7 +1513,21 @@ function main() {
 
   console.log(`[triage] repo=${options.repo} mode=${options.post ? 'post' : 'dry-run'} since=${sinceIso} items=${items.length}${scopeLabel}`);
 
-  const results = [];
+  const resultMap = new Map();
+  let cookiePromise = null;
+  const getCookie = async () => {
+    if (!cookiePromise) {
+      cookiePromise = (async () => loginWithToken(options.chatBaseUrl, readOwnerToken()))();
+    }
+    try {
+      return await cookiePromise;
+    } catch (error) {
+      cookiePromise = null;
+      throw error;
+    }
+  };
+
+  await reconcilePendingItems(options, state, resultMap, getCookie);
 
   for (const item of items) {
     const kind = item.pull_request ? 'pr' : 'issue';
@@ -1001,28 +1563,68 @@ function main() {
       const threadText = [item.body || '', issueComments.map((comment) => comment.body || '').join('\n')].join('\n');
       const classification = classifyThread(item, threadText);
       const relevantContext = findRelevantContext(item, issueComments, latestExternalActivity);
-      const replyBody = needsReply
-        ? buildReply({
-            item,
-            kind,
-            language,
-            followUp,
-            classification,
-            relevantContext,
-            maintainerTest: maintainerTestNeedsReply,
-          })
-        : '';
+      const existingState = state.items[String(item.number)] || {};
+      let automation = existingState.automation && typeof existingState.automation === 'object'
+        ? { ...existingState.automation }
+        : null;
+      const eventKey = needsReply ? buildEventKey(options.repo, item, latestExternalActivity, replyMode) : '';
 
       let action = {
         mode: 'skipped',
         reason: defaultSkipReason(item, latestExternalActivity, maintainersLookup, taggedReply, options.replyToMaintainers),
       };
 
-      if (needsReply && options.post) {
-        const comment = postIssueComment(options.repo, item.number, replyBody);
-        action = { mode: 'posted', commentUrl: comment.html_url || item.html_url };
-      } else if (needsReply) {
-        action = options.forceDraft ? { mode: 'dry-run', reason: 'forced draft preview' } : { mode: 'dry-run' };
+      const preSnapshotDetails = {
+        repo: options.repo,
+        kind,
+        authorIsMaintainer: openedByMaintainer(item, maintainersLookup),
+        needsReply,
+        replyMode,
+        latestExternalActivity,
+        latestMaintainerActivity,
+        latestTaggedReplyAt: taggedReply?.updated_at || taggedReply?.created_at || null,
+        actionLabel: needsReply ? 'preparing RemoteLab submission' : actionSummary(action),
+        relevantContext,
+        replyBody: trimString(automation?.replyBody),
+        automation,
+      };
+      const snapshotFile = writeSnapshot(
+        paths.snapshotDir,
+        item,
+        buildSnapshot(item, issueComments, pullRequestReviews, preSnapshotDetails),
+      );
+
+      if (needsReply) {
+        const sameEvent = automation?.eventKey === eventKey;
+        if (sameEvent && automation?.status === 'reply_sent') {
+          action = { mode: 'posted', commentUrl: automation.commentUrl || item.html_url };
+        } else if (sameEvent && ['processing_for_reply', 'reply_ready'].includes(automation?.status)) {
+          action = automation.status === 'reply_ready'
+            ? { mode: 'processing', reason: 'reply ready pending publish' }
+            : { mode: 'processing', reason: 'awaiting RemoteLab run' };
+        } else if (sameEvent && automation?.status === 'reply_failed') {
+          action = { mode: 'failed', reason: automation.lastError || 'previous automation failed' };
+        } else {
+          automation = await submitInboundUpdate(
+            options,
+            item,
+            kind,
+            replyMode,
+            classification,
+            relevantContext,
+            latestExternalActivity,
+            snapshotFile,
+            maintainerTestNeedsReply,
+            await getCookie(),
+          );
+          action = {
+            mode: 'submitted',
+            sessionId: automation.sessionId,
+            runId: automation.runId,
+            duplicate: automation.duplicate === true,
+            reason: automation.duplicate === true ? 'reused existing run' : 'submitted to RemoteLab',
+          };
+        }
       }
 
       const snapshotContent = buildSnapshot(item, issueComments, pullRequestReviews, {
@@ -1036,11 +1638,13 @@ function main() {
         latestTaggedReplyAt: taggedReply?.updated_at || taggedReply?.created_at || null,
         actionLabel: actionSummary(action),
         relevantContext,
-        replyBody,
+        replyBody: trimString(automation?.replyBody),
+        automation,
       });
-      const snapshotFile = writeSnapshot(paths.snapshotDir, item, snapshotContent);
+      writeSnapshot(paths.snapshotDir, item, snapshotContent);
 
       state.items[String(item.number)] = {
+        ...existingState,
         number: item.number,
         kind,
         title: item.title,
@@ -1054,29 +1658,41 @@ function main() {
         needsReply,
         replyMode,
         classification,
+        language,
         relevantContext: relevantContext.map((entry) => ({ relPath: entry.relPath, heading: entry.heading })),
         lastAction: action,
         snapshotFile,
+        automation,
       };
 
-      results.push({ number: item.number, kind, needsReply, action, snapshotFile, title: item.title });
+      resultMap.set(item.number, { number: item.number, kind, needsReply, action, snapshotFile, title: item.title });
 
-      const statusLabel = needsReply
-        ? (options.forceDraft ? 'draft-preview' : 'needs-reply')
-        : `synced (${action.reason})`;
+      const statusLabel = statusLabelForAction(action, needsReply);
       console.log(`[triage] ${kind.toUpperCase()} #${item.number} ${statusLabel} -> ${snapshotFile}`);
-      if (needsReply && !options.post) {
-        console.log(`\n[triage] Draft for #${item.number}:\n${replyBody}\n`);
-      }
       if (options.verbose) {
-        console.log(`[triage] external=${formatEvent(latestExternalActivity)} maintainer=${formatEvent(latestMaintainerActivity)} tagged=${taggedReply ? (taggedReply.updated_at || taggedReply.created_at) : 'none'}`);
+        console.log(`[triage] external=${formatEvent(latestExternalActivity)} maintainer=${formatEvent(latestMaintainerActivity)} tagged=${taggedReply ? (taggedReply.updated_at || taggedReply.created_at) : 'none'} classification=${classification} language=${language}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({ number: item.number, kind, error: message, title: item.title });
+      const existingState = state.items[String(item.number)] || {};
+      state.items[String(item.number)] = {
+        ...existingState,
+        number: item.number,
+        kind,
+        title: item.title,
+        url: item.html_url,
+        state: item.state,
+        updatedAt: item.updated_at,
+        lastAction: { mode: 'failed', reason: message },
+        snapshotFile: existingState.snapshotFile || snapshotPath(paths.snapshotDir, item),
+        automation: existingState.automation,
+      };
+      resultMap.set(item.number, { number: item.number, kind, error: message, title: item.title, action: { mode: 'failed', reason: message } });
       console.error(`[triage] Failed on ${kind.toUpperCase()} #${item.number}: ${message}`);
     }
   }
+
+  await reconcilePendingItems(options, state, resultMap, getCookie);
 
   state.repo = options.repo;
   if (options.onlyNumbers.length === 0) {
@@ -1085,11 +1701,18 @@ function main() {
   }
   writeJson(paths.stateFile, state);
 
+  const results = Array.from(resultMap.values());
   const postedCount = results.filter((entry) => entry.action?.mode === 'posted').length;
+  const submittedCount = results.filter((entry) => entry.action?.mode === 'submitted').length;
+  const processingCount = results.filter((entry) => entry.action?.mode === 'processing').length;
   const draftCount = results.filter((entry) => entry.action?.mode === 'dry-run').length;
-  const errorCount = results.filter((entry) => entry.error).length;
-  console.log(`[triage] done posted=${postedCount} drafts=${draftCount} errors=${errorCount} state=${paths.stateFile}`);
+  const errorCount = results.filter((entry) => entry.error || entry.action?.mode === 'failed').length;
+  console.log(`[triage] done posted=${postedCount} submitted=${submittedCount} processing=${processingCount} drafts=${draftCount} errors=${errorCount} state=${paths.stateFile}`);
   if (errorCount > 0) process.exitCode = 1;
 }
 
-main();
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[triage] fatal: ${message}`);
+  process.exitCode = 1;
+});

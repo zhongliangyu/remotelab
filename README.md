@@ -6,6 +6,8 @@ Control AI coding tools (Claude Code, Codex, Cline) from your phone mac or any o
 
 ![Chat UI](docs/demo.gif)
 
+> Release baseline: `v0.2` — the first product-shaped RemoteLab release after `v0.1`.
+
 ---
 
 ## For Humans
@@ -65,6 +67,8 @@ Open `https://[subdomain].[domain]/?token=YOUR_TOKEN` on your phone:
 
 Note: some screenshots/GIFs still show the older folder-picker flow during this transition. If you prefer that model, use [v0.1](https://github.com/Ninglo/remotelab/releases/tag/v0.1).
 
+Validation scripts now live under `tests/` so the repo root stays focused on runtime entrypoints and docs.
+
 ### Daily usage
 
 Once set up, the service auto-starts on boot (macOS LaunchAgent / Linux systemd). Just open the URL on your phone.
@@ -106,6 +110,10 @@ Active runs now execute in detached sidecars. If `chat-server` restarts mid-run,
 
 For self-hosting development, keep two chat-server planes active: use `7690` as the stable coding/operator plane and `7692` as the restartable validation plane. Avoid doing active coding work from `7692`; use it to verify changes, restart freely, and confirm behavior. Once `7692` is good, finish your current message on `7690` and only then restart/reload `7690` if needed. For custom-port dev instances, use `scripts/chat-instance.sh`.
 
+For a top-down code map of the shipped system, see `docs/project-architecture.md`.
+
+If you want to integrate email, GitHub, bots, or other external tools into the same session/message flow, see `docs/external-message-protocol.md`.
+
 ---
 
 ## CLI Reference
@@ -137,7 +145,7 @@ remotelab --help               Show help
 |------|----------|
 | `~/.config/remotelab/auth.json` | Access token + password hash |
 | `~/.config/remotelab/chat-sessions.json` | Chat session metadata |
-| `~/.config/remotelab/chat-history/` | Per-session event logs (JSONL) |
+| `~/.config/remotelab/chat-history/` | Per-session event store (`meta.json`, `context.json`, `events/*.json`, `bodies/*.txt`) |
 | `~/.config/remotelab/shared-snapshots/` | Immutable read-only session share snapshots |
 | `~/Library/Logs/chat-server.log` | Chat server stdout **(macOS)** |
 | `~/.local/share/remotelab/logs/chat-server.log` | Chat server stdout **(Linux)** |

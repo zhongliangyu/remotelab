@@ -19,9 +19,18 @@ writeFileSync(
   `#!/usr/bin/env node
 const prompt = process.argv[process.argv.length - 1] || '';
 const isTitlePrompt = prompt.includes('You are naming a developer session');
+const wantsGrouping = prompt.includes('"group"') && prompt.includes('"description"');
 const delayMs = isTitlePrompt ? 50 : 220;
 const text = isTitlePrompt
-  ? JSON.stringify({ title: 'Start Rename Earlier' })
+  ? JSON.stringify(
+      wantsGrouping
+        ? {
+            title: 'RemoteLab Rename Flow',
+            group: 'RemoteLab',
+            description: 'Refactor the naming flow before the first run finishes.',
+          }
+        : { title: 'RemoteLab Rename Flow' }
+    )
   : 'main task finished';
 
 console.log(JSON.stringify({ type: 'thread.started', thread_id: isTitlePrompt ? 'title-thread' : 'run-thread' }));
@@ -90,8 +99,6 @@ async function waitFor(predicate, description, timeoutMs = 4000) {
 }
 
 const session = await createSession(tempHome, 'fake-codex', '', {
-  group: 'Tests',
-  description: 'Verify title generation starts before the main run finishes.',
 });
 
 await sendMessage(session.id, 'Refactor the naming flow so renaming starts immediately after the user sends a message.', [], {
@@ -106,14 +113,19 @@ await waitFor(
 );
 
 await waitFor(
-  async () => (await getSession(session.id))?.name === 'Start Rename Earlier',
-  'session should receive the final AI title before the main run ends',
+  async () => {
+    const current = await getSession(session.id);
+    return current?.name === 'Rename Flow'
+      && current?.group === 'RemoteLab'
+      && current?.description === 'Refactor the naming flow before the first run finishes.';
+  },
+  'session should receive early title and grouping before the main run ends',
 );
 
 assert.equal(
   (await getSession(session.id))?.status,
   'running',
-  'early rename should land while the main task is still running',
+  'early rename and grouping should land while the main task is still running',
 );
 
 await waitFor(
@@ -122,7 +134,13 @@ await waitFor(
 );
 
 const finished = await getSession(session.id);
-assert.equal(finished?.name, 'Start Rename Earlier', 'finished session should keep the early AI title');
+assert.equal(finished?.name, 'Rename Flow', 'finished session should keep the de-duplicated early AI title');
+assert.equal(finished?.group, 'RemoteLab', 'finished session should keep the early AI grouping');
+assert.equal(
+  finished?.description,
+  'Refactor the naming flow before the first run finishes.',
+  'finished session should keep the early AI description',
+);
 assert.equal(finished?.autoRenamePending, false, 'successful early rename should clear autoRenamePending');
 
 killAll();

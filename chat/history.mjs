@@ -18,6 +18,7 @@ const BODY_FIELD_BY_TYPE = {
   tool_result: 'output',
 };
 const ALWAYS_EXTERNALIZE_TYPES = new Set(['reasoning']);
+const DEFERRED_INDEX_BODY_TYPES = new Set(['reasoning', 'tool_use', 'tool_result']);
 const INLINE_BODY_LIMITS = {
   message: 64 * 1024,
   reasoning: 0,
@@ -122,6 +123,32 @@ function previewLimitFor(event) {
 
 function inlineLimitFor(event) {
   return INLINE_BODY_LIMITS[event?.type] ?? 4096;
+}
+
+function shouldDeferEventBodyInIndex(event, options = {}) {
+  if (options.includeBodies === true) return false;
+  return DEFERRED_INDEX_BODY_TYPES.has(event?.type);
+}
+
+function serializeEventForIndex(event, options = {}) {
+  const next = clone(event);
+  if (!shouldDeferEventBodyInIndex(next, options)) {
+    return next;
+  }
+  const bodyField = eventBodyField(next);
+  if (!bodyField) {
+    return next;
+  }
+  const inlineBody = typeof next[bodyField] === 'string' ? next[bodyField] : '';
+  const hasBody = !!inlineBody || next.bodyAvailable === true || !!next.bodyRef;
+  next[bodyField] = '';
+  next.bodyField = bodyField;
+  next.bodyAvailable = hasBody;
+  next.bodyLoaded = false;
+  if (hasBody && !Number.isInteger(next.bodyBytes) && inlineBody) {
+    next.bodyBytes = Buffer.byteLength(inlineBody, 'utf8');
+  }
+  return next;
 }
 
 async function loadMeta(sessionId) {
@@ -386,26 +413,36 @@ export async function readEventBySeq(sessionId, seq, options = {}) {
   return options.includeBodies === false ? stored : hydrateEvent(sessionId, stored);
 }
 
-export async function readEventsAfter(sessionId, afterSeq = 0, limit = 500, options = {}) {
+export async function readEventsAfter(sessionId, afterSeq = 0, options = {}) {
   const meta = await loadMeta(sessionId);
   const includeBodies = options.includeBodies === true;
   const events = [];
-  const maxSeq = Math.min(meta.latestSeq, afterSeq + Math.max(1, limit));
-  for (let seq = Math.max(1, afterSeq + 1); seq <= maxSeq; seq += 1) {
+  for (let seq = Math.max(1, afterSeq + 1); seq <= meta.latestSeq; seq += 1) {
     const stored = await loadStoredEvent(sessionId, seq);
     if (!stored) continue;
-    events.push(includeBodies ? await hydrateEvent(sessionId, stored) : stored);
+    if (includeBodies) {
+      events.push(await hydrateEvent(sessionId, stored));
+    } else {
+      events.push(serializeEventForIndex(stored, options));
+    }
   }
   return events;
 }
 
 export async function readEventBody(sessionId, seq) {
   const stored = await loadStoredEvent(sessionId, seq);
-  if (!stored?.bodyRef || !stored.bodyField) return null;
-  const body = await readBody(sessionId, stored.bodyRef);
+  const bodyField = stored?.bodyField || eventBodyField(stored);
+  if (!stored || !bodyField) return null;
+  let body = '';
+  if (stored.bodyRef) {
+    body = await readBody(sessionId, stored.bodyRef);
+  } else if (typeof stored[bodyField] === 'string') {
+    body = stored[bodyField];
+  }
+  if (!body) return null;
   return {
     seq,
-    field: stored.bodyField,
+    field: bodyField,
     value: body,
     bytes: stored.bodyBytes || Buffer.byteLength(body, 'utf8'),
   };

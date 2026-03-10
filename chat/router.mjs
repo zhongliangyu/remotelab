@@ -1,8 +1,10 @@
 import { readFile, readdir } from 'fs/promises';
+import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve, dirname, basename } from 'path';
 import { parse as parseUrl, fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import { SESSION_EXPIRY, CHAT_IMAGES_DIR } from '../lib/config.mjs';
 import {
   sessions, saveAuthSessionsAsync,
@@ -23,6 +25,7 @@ import {
   listSessions,
   renameSession,
   resumeInterruptedSession,
+  sendMessage,
   setSessionArchived,
   submitHttpMessage,
 } from './session-manager.mjs';
@@ -48,6 +51,9 @@ const chatTemplatePath = join(__dirname, '..', 'templates', 'chat.html');
 const loginTemplatePath = join(__dirname, '..', 'templates', 'login.html');
 const shareTemplatePath = join(__dirname, '..', 'templates', 'share.html');
 const staticDir = join(__dirname, '..', 'static');
+const packageJsonPath = join(__dirname, '..', 'package.json');
+
+const BUILD_INFO = loadBuildInfo();
 
 const staticMimeTypes = {
   'manifest.json': 'application/manifest+json',
@@ -59,8 +65,55 @@ const staticMimeTypes = {
   'sw.js': 'application/javascript',
 };
 
+function loadBuildInfo() {
+  let version = 'dev';
+  try {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    if (pkg?.version) version = String(pkg.version);
+  } catch {}
+
+  let commit = '';
+  try {
+    commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: join(__dirname, '..'),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {}
+
+  const assetVersion = [version, commit || `start-${Date.now().toString(36)}`]
+    .filter(Boolean)
+    .join('-')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-');
+  const label = commit || version;
+  const title = commit ? `v${version} · ${commit}` : `v${version}`;
+  return { version, commit, assetVersion, label, title };
+}
+
+function renderPageTemplate(template, nonce, replacements = {}) {
+  const merged = {
+    NONCE: nonce,
+    ASSET_VERSION: BUILD_INFO.assetVersion,
+    BUILD_LABEL: BUILD_INFO.label,
+    BUILD_TITLE: BUILD_INFO.title,
+    BUILD_JSON: serializeJsonForScript(BUILD_INFO),
+    ...replacements,
+  };
+  return Object.entries(merged).reduce(
+    (output, [key, value]) => output.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), String(value ?? '')),
+    template,
+  );
+}
+
+function buildHeaders(headers = {}) {
+  return {
+    'X-RemoteLab-Build': BUILD_INFO.title,
+    ...headers,
+  };
+}
+
 function writeJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.writeHead(statusCode, buildHeaders({ 'Content-Type': 'application/json' }));
   res.end(JSON.stringify(payload));
 }
 
@@ -94,6 +147,7 @@ function writeCachedResponse(req, res, {
   const headers = {
     'Cache-Control': cacheControl,
     ETag: etag,
+    'X-RemoteLab-Build': BUILD_INFO.title,
   };
   if (vary) headers.Vary = vary;
 
@@ -205,10 +259,12 @@ export async function handleRequest(req, res) {
     try {
       const content = await readFile(join(staticDir, staticName));
       writeFileCached(req, res, staticMimeTypes[staticName], content, {
-        cacheControl: 'public, no-cache',
+        cacheControl: staticName === 'sw.js'
+          ? 'no-store, max-age=0, must-revalidate'
+          : 'public, no-cache, max-age=0, must-revalidate',
       });
     } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('Not Found');
     }
     return;
@@ -280,11 +336,16 @@ export async function handleRequest(req, res) {
     const mode = parsedUrl.query.mode === 'token' ? 'token' : 'pw';
     let loginHtml;
     try { loginHtml = await readFile(loginTemplatePath, 'utf8'); } catch { loginHtml = '<h1>Login template missing</h1>'; }
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(loginHtml
-      .replace(/\{\{NONCE\}\}/g, nonce)
-      .replace(/\{\{ERROR_CLASS\}\}/g, hasError ? '' : 'hidden')
-      .replace(/\{\{MODE\}\}/g, mode));
+    res.writeHead(200, buildHeaders({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    }));
+    res.end(renderPageTemplate(loginHtml, nonce, {
+      ERROR_CLASS: hasError ? '' : 'hidden',
+      MODE: mode,
+    }));
     return;
   }
 
@@ -302,13 +363,13 @@ export async function handleRequest(req, res) {
   if (pathname.startsWith('/app/') && req.method === 'GET') {
     const shareToken = pathname.slice('/app/'.length);
     if (!shareToken) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('Not Found');
       return;
     }
     const app = await getAppByShareToken(shareToken);
     if (!app) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('App not found');
       return;
     }
@@ -345,22 +406,22 @@ export async function handleRequest(req, res) {
     const shareId = pathname.slice('/share/'.length);
     const snapshot = await getShareSnapshot(shareId);
     if (!snapshot) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('Shared snapshot not found');
       return;
     }
     setShareSnapshotHeaders(res, nonce);
     try {
       const sharePage = await readFile(shareTemplatePath, 'utf8');
-      res.writeHead(200, {
+      res.writeHead(200, buildHeaders({
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'public, max-age=31536000, immutable',
-      });
-      res.end(sharePage
-        .replace(/\{\{NONCE\}\}/g, nonce)
-        .replace(/\{\{SNAPSHOT_JSON\}\}/g, serializeJsonForScript(snapshot)));
+      }));
+      res.end(renderPageTemplate(sharePage, nonce, {
+        SNAPSHOT_JSON: serializeJsonForScript(snapshot),
+      }));
     } catch {
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.writeHead(500, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('Failed to load share page');
     }
     return;
@@ -403,19 +464,8 @@ export async function handleRequest(req, res) {
   if (sessionGetRoute?.kind === 'events') {
     const { sessionId } = sessionGetRoute;
     if (!requireSessionAccess(res, authSession, sessionId)) return;
-    const afterSeq = Math.max(0, parseInt(parsedUrl.query.afterSeq || '0', 10) || 0);
-    const limit = Math.min(1000, Math.max(1, parseInt(parsedUrl.query.limit || '500', 10) || 500));
-    const events = await getSessionEventsAfter(sessionId, afterSeq, limit);
-    const session = await getSession(sessionId);
-    writeJsonCached(req, res, {
-      sessionId,
-      events,
-      cursor: {
-        afterSeq,
-        nextAfterSeq: events.length > 0 ? events[events.length - 1].seq : afterSeq,
-        latestSeq: session?.latestSeq || afterSeq,
-      },
-    });
+    const events = await getSessionEventsAfter(sessionId, 0);
+    writeJsonCached(req, res, { sessionId, events });
     return;
   }
 
@@ -487,24 +537,26 @@ export async function handleRequest(req, res) {
         writeJson(res, 400, { error: 'Invalid request body' });
         return;
       }
-      if (!payload?.requestId || typeof payload.requestId !== 'string') {
-        writeJson(res, 400, { error: 'requestId is required' });
-        return;
-      }
       if (!payload?.text || typeof payload.text !== 'string') {
         writeJson(res, 400, { error: 'text is required' });
         return;
       }
       try {
-        const outcome = await submitHttpMessage(sessionId, payload.text.trim(), payload.images || [], {
-          requestId: payload.requestId,
+        const requestId = typeof payload?.requestId === 'string' ? payload.requestId.trim() : '';
+        const messageOptions = {
           tool: authSession?.role === 'visitor' ? undefined : payload.tool || undefined,
           thinking: authSession?.role === 'visitor' ? false : !!payload.thinking,
           model: authSession?.role === 'visitor' ? undefined : payload.model || undefined,
           effort: authSession?.role === 'visitor' ? undefined : payload.effort || undefined,
-        });
+        };
+        const outcome = requestId
+          ? await submitHttpMessage(sessionId, payload.text.trim(), payload.images || [], {
+              ...messageOptions,
+              requestId,
+            })
+          : await sendMessage(sessionId, payload.text.trim(), payload.images || [], messageOptions);
         writeJson(res, outcome.duplicate ? 200 : 202, {
-          requestId: payload.requestId,
+          requestId: requestId || outcome.run?.requestId || null,
           duplicate: outcome.duplicate,
           run: outcome.run,
           session: outcome.session,
@@ -520,6 +572,11 @@ export async function handleRequest(req, res) {
       if (!requireSessionAccess(res, authSession, sessionId)) return;
       const run = await cancelActiveRun(sessionId);
       if (!run) {
+        const session = await getSession(sessionId);
+        if (session && session.status !== 'running') {
+          writeJson(res, 200, { run: null, session });
+          return;
+        }
         writeJson(res, 409, { error: 'No active run' });
         return;
       }
@@ -674,6 +731,11 @@ export async function handleRequest(req, res) {
       if (!requireSessionAccess(res, authSession, run.sessionId)) return;
       const updated = await cancelActiveRun(run.sessionId);
       if (!updated) {
+        const refreshed = await getRunState(runId);
+        if (refreshed && refreshed.state !== 'running' && refreshed.state !== 'accepted') {
+          writeJson(res, 200, { run: refreshed });
+          return;
+        }
         writeJson(res, 409, { error: 'No active run' });
         return;
       }
@@ -954,15 +1016,20 @@ export async function handleRequest(req, res) {
   if (pathname === '/') {
     try {
       const chatPage = await readFile(chatTemplatePath, 'utf8');
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache' });
-      res.end(chatPage.replace(/\{\{NONCE\}\}/g, nonce));
+      res.writeHead(200, buildHeaders({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }));
+      res.end(renderPageTemplate(chatPage, nonce));
     } catch {
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.writeHead(500, buildHeaders({ 'Content-Type': 'text/plain' }));
       res.end('Failed to load chat page');
     }
     return;
   }
 
-  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
   res.end('Not Found');
 }

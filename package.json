@@ -1,17 +1,17 @@
 {
-  "name": "@trmquang93/remotelab",
-  "version": "1.1.0",
+  "name": "@ninglo/remotelab",
+  "version": "0.2.0",
   "description": "Remote browser access to any CLI dev tool (Claude, Copilot, Codex, Cline and more) via HTTPS",
   "type": "module",
   "license": "MIT",
-  "author": "trmquang93",
-  "homepage": "https://github.com/trmquang93/remotelab#readme",
+  "author": "Ninglo",
+  "homepage": "https://github.com/Ninglo/remotelab#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/trmquang93/remotelab.git"
+    "url": "git+https://github.com/Ninglo/remotelab.git"
   },
   "bugs": {
-    "url": "https://github.com/trmquang93/remotelab/issues"
+    "url": "https://github.com/Ninglo/remotelab/issues"
   },
   "keywords": [
     "claude",
@@ -39,6 +39,10 @@
   "bin": {
     "remotelab": "cli.js"
   },
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
   "files": [
     "cli.js",
     "auth-proxy.mjs",
@@ -59,6 +63,8 @@
   "scripts": {
     "start": "node auth-proxy.mjs",
     "chat": "node chat-server.mjs",
+    "test": "npm run test:smoke",
+    "test:smoke": "node tests/test-session-naming.mjs && node tests/test-cloudflared-config.mjs && node tests/test-history-index-contract.mjs && node tests/test-session-route-utils.mjs && node tests/test-session-external-trigger-refresh.mjs && node tests/test-session-label-prompt-context.mjs && node tests/test-agent-mailbox.mjs && node tests/test-agent-mail-worker.mjs && node tests/test-agent-mail-reply.mjs",
     "stop": "./stop.sh",
     "setup": "./setup.sh",
     "generate-token": "node generate-token.mjs",

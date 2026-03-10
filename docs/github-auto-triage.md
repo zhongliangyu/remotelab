@@ -110,7 +110,7 @@ macOS 上最合适的是 `launchd` 每 1 分钟跑一次。当前更推荐走一
 示例命令：
 
 ```bash
-/Users/jiujianian/.remotelab/scripts/run-github-auto-triage.sh
+~/.remotelab/scripts/run-github-auto-triage.sh
 ```
 
 这个 wrapper 做了两件事：
@@ -130,7 +130,7 @@ macOS 上最合适的是 `launchd` 每 1 分钟跑一次。当前更推荐走一
 
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/jiujianian/.remotelab/scripts/run-github-auto-triage.sh</string>
+      <string>~/.remotelab/scripts/run-github-auto-triage.sh</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -140,10 +140,10 @@ macOS 上最合适的是 `launchd` 每 1 分钟跑一次。当前更推荐走一
     <integer>60</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/jiujianian/.remotelab/logs/github-auto-triage.log</string>
+    <string>~/.remotelab/logs/github-auto-triage.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/jiujianian/.remotelab/logs/github-auto-triage.log</string>
+    <string>~/.remotelab/logs/github-auto-triage.log</string>
   </dict>
 </plist>
 ```

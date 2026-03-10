@@ -6,8 +6,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#f5f5f5">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="remotelab-build" content="{{BUILD_TITLE}}">
+  <link rel="manifest" href="/manifest.json?v={{ASSET_VERSION}}">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v={{ASSET_VERSION}}">
   <title>RemoteLab — Sign In</title>
   <style nonce="{{NONCE}}">
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -126,6 +127,14 @@
     }
 
     .switch a:hover { color: #111; }
+
+    .build-stamp {
+      margin-top: 14px;
+      text-align: center;
+      font-size: 10px;
+      color: #aaa;
+      user-select: text;
+    }
   </style>
 </head>
 <body>
@@ -162,6 +171,8 @@
     <div class="switch">
       <a href="#" id="toggle-link">Use access token instead</a>
     </div>
+
+    <div class="build-stamp" title="{{BUILD_TITLE}}">{{BUILD_LABEL}}</div>
   </div>
 
   <script nonce="{{NONCE}}">

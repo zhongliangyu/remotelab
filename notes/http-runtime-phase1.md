@@ -253,8 +253,9 @@ If future query or coordination pain becomes real, the next upgrade path is embe
   - list sessions with summary metadata including `latestSeq` and `activeRunId`
 - `GET /api/sessions/:id`
   - return canonical session metadata
-- `GET /api/sessions/:id/events?afterSeq=<n>&limit=<n>`
-  - return normalized events after a cursor/sequence
+- `GET /api/sessions/:id/events?afterSeq=<n>`
+  - return the full normalized event index after a cursor/sequence
+  - keep thinking and tool bodies deferred to `GET /api/sessions/:id/events/:seq/body`
 
 ### Run reads
 

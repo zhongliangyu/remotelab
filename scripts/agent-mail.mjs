@@ -66,6 +66,24 @@ function optionList(options, key) {
   return Array.isArray(value) ? value : [value];
 }
 
+function optionBoolean(options, key, fallbackValue = undefined) {
+  const value = optionValue(options, key, fallbackValue);
+  if (value === undefined) {
+    return fallbackValue;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallbackValue;
+}
+
 function printUsage() {
   console.log(`Usage:
   node scripts/agent-mail.mjs init --name <name> --local-part <localPart> --domain <domain> [--allow <email>] [--allow-domain <domain>]
@@ -76,16 +94,19 @@ function printUsage() {
   node scripts/agent-mail.mjs queue [review|quarantine|approved] [--root <dir>]
   node scripts/agent-mail.mjs approve <id> [--reviewer <name>] [--root <dir>]
   node scripts/agent-mail.mjs outbound status [--root <dir>]
-  node scripts/agent-mail.mjs outbound configure-forwardemail [--alias <email>] [--from <email>] [--api-token-env <ENV>] [--password-env <ENV>] [--api-base-url <url>] [--root <dir>]
+  node scripts/agent-mail.mjs outbound configure-apple-mail [--account <name-or-email>] [--root <dir>]
+  node scripts/agent-mail.mjs outbound configure-cloudflare-worker [--worker-base-url <url>] [--from <email>] [--worker-token <token>] [--worker-token-env <ENV>] [--root <dir>]
   node scripts/agent-mail.mjs automation status [--root <dir>]
-  node scripts/agent-mail.mjs automation configure [--chat-base-url <url>] [--folder <dir>] [--tool <tool>] [--group <name>] [--description <text>] [--system-prompt <text>] [--model <name>] [--effort <level>] [--thinking] [--root <dir>]
+  node scripts/agent-mail.mjs automation configure [--enabled <true|false>] [--allowlist-auto-approve <true|false>] [--auto-approve-reviewer <name>] [--chat-base-url <url>] [--folder <dir>] [--tool <tool>] [--group <name>] [--description <text>] [--system-prompt <text>] [--model <name>] [--effort <level>] [--thinking <true|false>] [--root <dir>]
 
 Examples:
-  node scripts/agent-mail.mjs init --name Rowan --local-part rowan --domain jiujianian-dev-world.win --allow jiujianian@gmail.com
+  node scripts/agent-mail.mjs init --name Rowan --local-part rowan --domain example.com --allow owner@example.com
   node scripts/agent-mail.mjs ingest --source /tmp/mail-samples
   node scripts/agent-mail.mjs queue review
-  node scripts/agent-mail.mjs approve mail_123 --reviewer jiujianian
-  node scripts/agent-mail.mjs outbound configure-forwardemail --alias rowan@jiujianian.dev --password-env FORWARD_EMAIL_ALIAS_PASSWORD`);
+  node scripts/agent-mail.mjs approve mail_123 --reviewer operator
+  node scripts/agent-mail.mjs outbound configure-apple-mail --account Google
+  node scripts/agent-mail.mjs outbound configure-cloudflare-worker --from agent@example.com --worker-base-url https://remotelab-email-worker.example.workers.dev
+  node scripts/agent-mail.mjs automation configure --allowlist-auto-approve true --chat-base-url http://127.0.0.1:7692`);
 }
 
 function printJson(value) {
@@ -189,25 +210,35 @@ async function main() {
       return;
     }
 
-    if (action === 'configure-forwardemail') {
+    if (action === 'configure-apple-mail') {
       const current = loadOutboundConfig(rootDir);
-      const nextConfig = saveOutboundConfig(rootDir, {
+      saveOutboundConfig(rootDir, {
         ...current,
-        provider: 'forwardemail_api',
-        alias: optionValue(options, 'alias', current.alias),
-        from: optionValue(options, 'from', current.from),
-        apiBaseUrl: optionValue(options, 'api-base-url', current.apiBaseUrl),
-        apiToken: optionValue(options, 'api-token', current.apiToken),
-        apiTokenEnv: optionValue(options, 'api-token-env', current.apiTokenEnv),
-        password: optionValue(options, 'password', current.password),
-        passwordEnv: optionValue(options, 'password-env', current.passwordEnv),
+        provider: 'apple_mail',
+        account: optionValue(options, 'account', current.account),
+        from: optionValue(options, 'from', ''),
       });
       console.log(`Updated outbound config at ${mailboxPaths(rootDir).outboundFile}`);
       printJson(getMailboxStatus(rootDir).outbound);
       return;
     }
 
-    throw new Error('outbound requires a subcommand: status | configure-forwardemail');
+    if (action === 'configure-cloudflare-worker') {
+      const current = loadOutboundConfig(rootDir);
+      saveOutboundConfig(rootDir, {
+        ...current,
+        provider: 'cloudflare_worker',
+        workerBaseUrl: optionValue(options, 'worker-base-url', current.workerBaseUrl),
+        from: optionValue(options, 'from', current.from),
+        workerToken: optionValue(options, 'worker-token', current.workerToken),
+        workerTokenEnv: optionValue(options, 'worker-token-env', current.workerTokenEnv),
+      });
+      console.log(`Updated outbound config at ${mailboxPaths(rootDir).outboundFile}`);
+      printJson(getMailboxStatus(rootDir).outbound);
+      return;
+    }
+
+    throw new Error('outbound requires a subcommand: status | configure-apple-mail | configure-cloudflare-worker');
   }
 
   if (command === 'automation') {
@@ -221,7 +252,9 @@ async function main() {
       const current = loadMailboxAutomation(rootDir);
       const nextAutomation = saveMailboxAutomation(rootDir, {
         ...current,
-        enabled: optionValue(options, 'enabled', current.enabled) !== 'false',
+        enabled: optionBoolean(options, 'enabled', current.enabled),
+        allowlistAutoApprove: optionBoolean(options, 'allowlist-auto-approve', current.allowlistAutoApprove),
+        autoApproveReviewer: optionValue(options, 'auto-approve-reviewer', current.autoApproveReviewer),
         chatBaseUrl: optionValue(options, 'chat-base-url', current.chatBaseUrl),
         session: {
           ...current.session,
@@ -232,7 +265,7 @@ async function main() {
           systemPrompt: optionValue(options, 'system-prompt', current.session.systemPrompt),
           model: optionValue(options, 'model', current.session.model),
           effort: optionValue(options, 'effort', current.session.effort),
-          thinking: optionValue(options, 'thinking', current.session.thinking) === true,
+          thinking: optionBoolean(options, 'thinking', current.session.thinking),
         },
       });
       console.log(`Updated automation config at ${mailboxPaths(rootDir).automationFile}`);

@@ -3,9 +3,9 @@
  * Integration test for the HTTP-first chat server.
  *
  * Usage:
- *   node test-chat.mjs                    # test codex (default)
- *   node test-chat.mjs claude             # test claude
- *   node test-chat.mjs codex              # test codex
+ *   node tests/test-chat.mjs                    # test codex (default)
+ *   node tests/test-chat.mjs claude             # test claude
+ *   node tests/test-chat.mjs codex              # test codex
  *
  * Requires chat-server to be running on CHAT_PORT (default 7690).
  */
@@ -118,7 +118,7 @@ async function sendMessage(cookie, sessionId, text) {
 }
 
 async function fetchAllEvents(cookie, sessionId) {
-  return fetchJson(cookie, `/api/sessions/${sessionId}/events?afterSeq=0&limit=500`);
+  return fetchJson(cookie, `/api/sessions/${sessionId}/events`);
 }
 
 async function main() {

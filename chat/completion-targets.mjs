@@ -61,6 +61,8 @@ function sanitizeEmailTarget(target, index) {
     to,
     from: trimString(target?.from),
     subject: normalizeSubject(target?.subject),
+    inReplyTo: trimString(target?.inReplyTo),
+    references: trimString(target?.references),
     mailboxRoot: trimString(target?.mailboxRoot),
     mailboxItemId: trimString(target?.mailboxItemId),
   };
@@ -136,9 +138,11 @@ async function deliverEmailTarget(target, session, run, options = {}) {
   const identity = loadIdentity(mailboxRoot);
   const result = await sendOutboundEmail({
     to: target.to,
-    from: firstNonEmpty(target.from, outboundConfig.from, identity?.address, outboundConfig.alias),
+    from: firstNonEmpty(target.from, outboundConfig.from, identity?.address),
     subject: target.subject,
     text: content,
+    inReplyTo: target.inReplyTo,
+    references: target.references,
   }, outboundConfig, options);
 
   const summary = summarizeDeliveryResult(result);

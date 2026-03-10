@@ -3,6 +3,17 @@ export const TEMP_SESSION_NAME_MAX_CHARS = 12;
 export const SESSION_GROUP_MAX_CHARS = 32;
 export const SESSION_DESCRIPTION_MAX_CHARS = 160;
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function trimSessionLabelDecorators(value) {
+  return value
+    .replace(/^[\s\-–—:：|/·•,，.]+/u, '')
+    .replace(/[\s\-–—:：|/·•,，.]+$/u, '')
+    .trim();
+}
+
 function normalizeSessionText(value, maxChars) {
   const normalized = typeof value === 'string'
     ? value.replace(/\s+/g, ' ').trim()
@@ -21,6 +32,22 @@ export function normalizeSessionGroup(group) {
 
 export function normalizeSessionDescription(description) {
   return normalizeSessionText(description, SESSION_DESCRIPTION_MAX_CHARS);
+}
+
+export function normalizeGeneratedSessionTitle(title, group) {
+  const normalizedTitle = normalizeSessionName(title);
+  const normalizedGroup = normalizeSessionGroup(group);
+  if (!normalizedTitle || !normalizedGroup) return normalizedTitle;
+
+  const escapedGroup = escapeRegExp(normalizedGroup);
+  let nextTitle = normalizedTitle
+    .replace(new RegExp(`^${escapedGroup}(?:[\\s\\-–—:：|/·•,，.]+)?`, 'iu'), '')
+    .replace(new RegExp(`(?:[\\s\\-–—:：|/·•,，.]+)?${escapedGroup}$`, 'iu'), '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+  nextTitle = trimSessionLabelDecorators(nextTitle);
+  return nextTitle || normalizedTitle;
 }
 
 export function resolveInitialSessionName(name) {

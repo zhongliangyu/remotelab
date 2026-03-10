@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="remotelab-build" content="{{BUILD_TITLE}}">
+<link rel="manifest" href="/manifest.json?v={{ASSET_VERSION}}">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v={{ASSET_VERSION}}">
 <title>RemoteLab Chat</title>
 <style nonce="{{NONCE}}">
 :root {
@@ -85,6 +86,18 @@ body {
 .status-dot.rename-failed { background: var(--error); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 #statusText { font-size: 12px; color: var(--text-muted); }
+.session-list-footer {
+  padding: 2px 12px 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.68;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.session-list-footer.hidden { display: none; }
 
 /* ---- App container ---- */
 .app-container {
@@ -341,6 +354,18 @@ body {
   max-width: 80%;
   color: var(--text);
 }
+.msg-timestamp {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.msg-user-time {
+  text-align: right;
+}
 .msg-images { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
 .msg-images img {
   max-width: 200px; max-height: 150px; border-radius: 8px; cursor: pointer;
@@ -392,6 +417,9 @@ body {
   color: var(--text);
   word-wrap: break-word;
   white-space: pre-wrap;
+}
+.msg-assistant-time {
+  margin-top: 10px;
 }
 
 /* Markdown rendered content */
@@ -619,9 +647,26 @@ body {
 }
 .input-wrapper:focus-within { border-color: #aaa; }
 .input-config-row {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 10px;
   padding: 8px 12px 6px;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.input-config-row::-webkit-scrollbar {
+  display: none;
+}
+.input-config-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: max-content;
+  flex-shrink: 0;
+}
+.input-config-group.right {
+  margin-left: auto;
 }
 .tool-select, .model-select, .effort-select {
   padding: 3px 7px; background: transparent; border: 1px solid var(--border);
@@ -643,6 +688,7 @@ body {
 }
 #contextTokens {
   font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .compact-btn {
   background: none; border: 1px solid var(--border); color: var(--text-muted);
@@ -906,6 +952,7 @@ body {
 
   .sidebar-overlay.collapsed .sidebar-header h2,
   .sidebar-overlay.collapsed .sidebar-list,
+  .sidebar-overlay.collapsed .session-list-footer,
   .sidebar-overlay.collapsed .new-session-btn { display: none; }
   .sidebar-overlay.collapsed .sidebar-header {
     justify-content: center; padding: 12px 4px;
@@ -959,6 +1006,7 @@ body.visitor-mode .header #menuBtn { display: none !important; }
       </div>
       <div class="sidebar-list" id="sessionList"></div>
       <div class="progress-panel" id="progressPanel"></div>
+      <div class="session-list-footer" id="sessionListFooter" title="Build {{BUILD_TITLE}}">Build {{BUILD_TITLE}}</div>
       <button class="new-session-btn" id="newSessionBtn">+ New Session</button>
     </aside>
   </div>
@@ -983,16 +1031,19 @@ body.visitor-mode .header #menuBtn { display: none !important; }
         <!-- Image preview inside wrapper -->
         <div class="img-preview-strip" id="imgPreviewStrip"></div>
         <div class="input-config-row">
-          <select class="tool-select" id="inlineToolSelect" disabled></select>
-          <select class="model-select" id="inlineModelSelect" disabled></select>
-          <button class="thinking-toggle" id="thinkingToggle" disabled>Thinking</button>
-          <select class="effort-select" id="effortSelect" disabled style="display:none"></select>
-          <button class="img-btn" id="imgBtn" disabled title="Attach image">&#128247;</button>
-          <span style="flex:1"></span>
-          <span id="contextTokens" style="display:none"></span>
-          <button class="compact-btn" id="resumeBtn" style="display:none" title="Resume the last turn interrupted by a server restart">Resume</button>
-          <button class="compact-btn" id="compactBtn" style="display:none" title="Ask model to summarize conversation, then reset context">Compact</button>
-          <button class="compact-btn" id="dropToolsBtn" style="display:none" title="Remove past tool results from context (no model call)">Drop tools</button>
+          <div class="input-config-group left">
+            <select class="tool-select" id="inlineToolSelect" disabled></select>
+            <select class="model-select" id="inlineModelSelect" disabled></select>
+            <button class="thinking-toggle" id="thinkingToggle" disabled>Thinking</button>
+            <select class="effort-select" id="effortSelect" disabled style="display:none"></select>
+            <button class="img-btn" id="imgBtn" disabled title="Attach image">&#128247;</button>
+          </div>
+          <div class="input-config-group right">
+            <span id="contextTokens" style="display:none"></span>
+            <button class="compact-btn" id="resumeBtn" style="display:none" title="Resume the last turn interrupted by a server restart">Resume</button>
+            <button class="compact-btn" id="compactBtn" style="display:none" title="Ask model to summarize conversation, then reset context">Compact</button>
+            <button class="compact-btn" id="dropToolsBtn" style="display:none" title="Remove past tool results from context (no model call)">Drop tools</button>
+          </div>
         </div>
         <div class="input-row">
           <input type="file" id="imgFileInput" accept="image/*" multiple hidden>
@@ -1089,8 +1140,8 @@ body.visitor-mode .header #menuBtn { display: none !important; }
   </div>
 </div>
 
-
-<script src="/marked.min.js" nonce="{{NONCE}}"></script>
-<script src="/chat.js" nonce="{{NONCE}}"></script>
+<script nonce="{{NONCE}}">window.__REMOTELAB_BUILD__ = {{BUILD_JSON}};</script>
+<script src="/marked.min.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
+<script src="/chat.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 </body>
 </html>

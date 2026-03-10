@@ -109,17 +109,23 @@ async function sanitizeEvent(event) {
         content: typeof event.content === 'string' ? event.content : '',
       };
     case 'usage':
+      {
       return {
         type: 'usage',
         id: event.id,
         timestamp: event.timestamp,
         role: event.role,
-        contextTokens: Number.isFinite(event.contextTokens)
-          ? event.contextTokens
-          : (Number.isFinite(event.inputTokens) ? event.inputTokens : 0),
+        ...(Number.isFinite(event.contextTokens) ? { contextTokens: event.contextTokens } : {}),
         inputTokens: Number.isFinite(event.inputTokens) ? event.inputTokens : 0,
         outputTokens: Number.isFinite(event.outputTokens) ? event.outputTokens : 0,
+        ...(Number.isFinite(event.contextWindowTokens)
+          ? { contextWindowTokens: event.contextWindowTokens }
+          : {}),
+        ...(typeof event.contextSource === 'string' && event.contextSource
+          ? { contextSource: event.contextSource }
+          : {}),
       };
+      }
     default:
       return null;
   }

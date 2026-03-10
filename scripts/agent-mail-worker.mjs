@@ -6,6 +6,8 @@ import { AUTH_FILE } from '../lib/config.mjs';
 import {
   APPROVED_QUEUE,
   DEFAULT_ROOT_DIR,
+  buildEmailThreadExternalTriggerId,
+  buildThreadReferencesHeader,
   loadMailboxAutomation,
   listQueue,
   updateQueueItem,
@@ -153,12 +155,22 @@ function buildReplyPrompt(item) {
 }
 
 function buildCompletionTarget(item, rootDir, requestId) {
+  const messageId = trimString(item?.message?.messageId);
+  const inReplyTo = trimString(item?.message?.inReplyTo);
+  const references = trimString(item?.message?.replyReferences)
+    || buildThreadReferencesHeader({
+      messageId,
+      inReplyTo,
+      references: trimString(item?.message?.references),
+    });
   return {
     id: `mailbox_email_${item.id}`,
     type: 'email',
     requestId,
     to: trimString(item?.message?.fromAddress),
     subject: buildReplySubject(item?.message?.subject),
+    inReplyTo: messageId,
+    references,
     mailboxRoot: rootDir,
     mailboxItemId: item.id,
   };
@@ -176,7 +188,13 @@ function shouldProcessItem(item) {
 
 async function submitApprovedItem(item, rootDir, automation, baseUrl, cookie) {
   const requestId = trimString(item?.automation?.requestId) || `mailbox_reply_${item.id}`;
-  const externalTriggerId = `mailbox:${item.id}`;
+  const externalTriggerId = trimString(item?.message?.externalTriggerId)
+    || buildEmailThreadExternalTriggerId({
+      messageId: trimString(item?.message?.messageId),
+      inReplyTo: trimString(item?.message?.inReplyTo),
+      references: trimString(item?.message?.references),
+    })
+    || `mailbox:${item.id}`;
   const completionTarget = buildCompletionTarget(item, rootDir, requestId);
   const sessionPayload = {
     folder: automation.session.folder,

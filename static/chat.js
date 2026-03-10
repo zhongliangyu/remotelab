@@ -1,7 +1,10 @@
 (function () {
   "use strict";
 
-  console.log("hello!");
+  const buildInfo = window.__REMOTELAB_BUILD__ || {};
+  const buildAssetVersion = buildInfo.assetVersion || "dev";
+
+  console.info("RemoteLab build", buildInfo.title || buildAssetVersion);
 
   // ---- Elements ----
   const menuBtn = document.getElementById("menuBtn");
@@ -10,6 +13,7 @@
   const collapseBtn = document.getElementById("collapseBtn");
   const shareSnapshotBtn = document.getElementById("shareSnapshotBtn");
   const sessionList = document.getElementById("sessionList");
+  const sessionListFooter = document.getElementById("sessionListFooter");
   const newSessionBtn = document.getElementById("newSessionBtn");
   const messagesEl = document.getElementById("messages");
   const messagesInner = document.getElementById("messagesInner");
@@ -76,15 +80,20 @@
   let pendingSummary = new Set(); // sessionIds awaiting summary generation
   let finishedUnread = new Set(); // sessionIds finished but not yet opened
   let lastSidebarUpdatedAt = {}; // sessionId -> last known updatedAt
-  let lastSeqBySession = {};
   let currentSessionRefreshPromise = null;
   let pendingCurrentSessionRefresh = false;
-  let pendingCurrentSessionRefreshReset = false;
+  let hasSeenWsOpen = false;
   const sidebarSessionRefreshPromises = new Map();
   const pendingSidebarSessionRefreshes = new Set();
   const jsonResponseCache = new Map();
   const eventBodyCache = new Map();
   const eventBodyRequests = new Map();
+  const messageTimeFormatter = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 
   let currentTokens = 0;
 
@@ -551,64 +560,59 @@
     return normalized;
   }
 
-  async function fetchSessionEvents(sessionId, { reset = false } = {}) {
-    const afterSeq = reset ? 0 : lastSeqBySession[sessionId] || 0;
+  async function fetchSessionEvents(sessionId) {
+    const hadRenderedMessages =
+      messagesInner.children.length > 0 && emptyState.parentNode !== messagesInner;
+    const shouldStickToBottom =
+      !hadRenderedMessages ||
+      messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120;
     const data = await fetchJsonOrRedirect(
-      `/api/sessions/${encodeURIComponent(sessionId)}/events?afterSeq=${afterSeq}&limit=500`,
+      `/api/sessions/${encodeURIComponent(sessionId)}/events`,
     );
     const events = data.events || [];
-    if (reset) {
-      clearMessages();
-      if (events.length === 0) {
-        showEmpty();
-      }
-      for (const event of events) {
-        renderEvent(event, false);
-      }
-      if (events.length > 0) scrollToBottom();
-      checkPendingMessage(events);
-    } else {
-      for (const event of events) {
-        if (event.type === "message" && event.role === "user") {
-          const optimistic = document.getElementById("optimistic-msg");
-          if (optimistic) optimistic.remove();
-          const pending = getPendingMessage();
-          if (pending && (!pending.requestId || pending.requestId === event.requestId)) {
-            clearPendingMessage();
-          }
-        }
-        renderEvent(event, true);
-      }
+    if (currentSessionId !== sessionId) return events;
+    clearMessages();
+    if (events.length === 0) {
+      showEmpty();
     }
-    lastSeqBySession[sessionId] = data.cursor?.nextAfterSeq || afterSeq;
+    for (const event of events) {
+      if (event.type === "message" && event.role === "user") {
+        const optimistic = document.getElementById("optimistic-msg");
+        if (optimistic) optimistic.remove();
+        const pending = getPendingMessage();
+        if (pending && (!pending.requestId || pending.requestId === event.requestId)) {
+          clearPendingMessage();
+        }
+      }
+      renderEvent(event, false);
+    }
+    if (events.length > 0 && shouldStickToBottom) scrollToBottom();
+    checkPendingMessage(events);
     return events;
   }
 
-  async function runCurrentSessionRefresh(sessionId, { resetEvents = false } = {}) {
+  async function runCurrentSessionRefresh(sessionId) {
     const session = await fetchSessionState(sessionId);
     if (currentSessionId !== sessionId) return session;
-    await fetchSessionEvents(sessionId, { reset: resetEvents });
+    await fetchSessionEvents(sessionId);
     return session;
   }
 
-  async function refreshCurrentSession({ resetEvents = false } = {}) {
+  async function refreshCurrentSession() {
     const sessionId = currentSessionId;
     if (!sessionId) return null;
     if (currentSessionRefreshPromise) {
       pendingCurrentSessionRefresh = true;
-      pendingCurrentSessionRefreshReset = pendingCurrentSessionRefreshReset || resetEvents;
       return currentSessionRefreshPromise;
     }
     currentSessionRefreshPromise = (async () => {
       try {
-        return await runCurrentSessionRefresh(sessionId, { resetEvents });
+        return await runCurrentSessionRefresh(sessionId);
       } finally {
         currentSessionRefreshPromise = null;
         if (pendingCurrentSessionRefresh) {
-          const nextReset = pendingCurrentSessionRefreshReset;
           pendingCurrentSessionRefresh = false;
-          pendingCurrentSessionRefreshReset = false;
-          refreshCurrentSession({ resetEvents: nextReset }).catch(() => {});
+          refreshCurrentSession().catch(() => {});
         }
       }
     })();
@@ -669,12 +673,12 @@
     if (visitorMode && visitorSessionId) {
       currentSessionId = visitorSessionId;
       attachSession(visitorSessionId, { id: visitorSessionId, name: "Session", status: "idle" });
-      await refreshCurrentSession({ resetEvents: true });
+      await refreshCurrentSession();
       return;
     }
     await fetchSessionsList();
     if (currentSessionId) {
-      await refreshCurrentSession({ resetEvents: true });
+      await refreshCurrentSession();
     } else {
       const initialSession = getLatestActiveSession() || getLatestSession();
       if (initialSession) {
@@ -687,7 +691,14 @@
     if (visitorMode) return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     try {
-      const reg = await navigator.serviceWorker.register("/sw.js");
+      const reg = await navigator.serviceWorker.register(
+        `/sw.js?v=${encodeURIComponent(buildAssetVersion)}`,
+        { updateViaCache: "none" },
+      );
+      await reg.update().catch(() => {});
+      reg.installing?.postMessage({ type: "remotelab:clear-caches" });
+      reg.waiting?.postMessage({ type: "remotelab:clear-caches" });
+      reg.active?.postMessage({ type: "remotelab:clear-caches" });
       await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
       if (existing) return; // already subscribed
@@ -1305,7 +1316,11 @@
         getCurrentSession()?.renameState,
         getCurrentSession()?.archived === true,
       );
-      refreshRealtimeViews().catch(() => {});
+      if (hasSeenWsOpen) {
+        refreshRealtimeViews().catch(() => {});
+      } else {
+        hasSeenWsOpen = true;
+      }
     };
 
     ws.onmessage = (e) => {
@@ -1348,8 +1363,7 @@
         case "attach":
           currentSessionId = msg.sessionId;
           hasAttachedSession = true;
-          lastSeqBySession[msg.sessionId] = 0;
-          await refreshCurrentSession({ resetEvents: true });
+          await refreshCurrentSession();
           return;
         case "create": {
           const data = await fetchJsonOrRedirect("/api/sessions", {
@@ -1447,8 +1461,7 @@
           await fetchJsonOrRedirect(`/api/sessions/${encodeURIComponent(currentSessionId)}/drop-tools`, {
             method: "POST",
           });
-          lastSeqBySession[currentSessionId] = 0;
-          await refreshCurrentSession({ resetEvents: true });
+          await refreshCurrentSession();
           return;
         default:
           return;
@@ -1581,6 +1594,25 @@
     requestAnimationFrame(() => {
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
+  }
+
+  function parseMessageTimestamp(stamp) {
+    if (typeof stamp === "number" && Number.isFinite(stamp)) return stamp;
+    if (typeof stamp === "string" && stamp.trim()) {
+      const parsed = new Date(stamp).getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  }
+
+  function appendMessageTimestamp(container, stamp, extraClass = "") {
+    const parsed = parseMessageTimestamp(stamp);
+    if (!parsed) return;
+    const time = document.createElement("div");
+    time.className = `msg-timestamp${extraClass ? ` ${extraClass}` : ""}`;
+    time.textContent = messageTimeFormatter.format(parsed);
+    time.title = new Date(parsed).toLocaleString();
+    container.appendChild(time);
   }
 
   function renderEvent(evt, autoScroll) {
@@ -1811,6 +1843,7 @@
         span.textContent = evt.content;
         bubble.appendChild(span);
       }
+      appendMessageTimestamp(bubble, evt.timestamp, "msg-user-time");
       wrap.appendChild(bubble);
       messagesInner.appendChild(wrap);
     } else {
@@ -1822,6 +1855,7 @@
         div.innerHTML = rendered;
         enhanceCodeBlocks(div);
       }
+      appendMessageTimestamp(div, evt.timestamp, "msg-assistant-time");
       messagesInner.appendChild(div);
     }
   }
@@ -1901,11 +1935,6 @@
       }
       body.appendChild(label);
       body.appendChild(pre);
-      if (evt.exitCode && evt.exitCode !== 0) {
-        targetCard.querySelector(".tool-header").classList.add("expanded");
-        body.classList.add("expanded");
-        hydrateLazyNodes(body).catch(() => {});
-      }
     }
   }
 
@@ -1949,21 +1978,45 @@
     messagesInner.appendChild(div);
   }
 
-  function formatTokens(n) {
-    if (n < 500) return "< 1K";
-    return "~" + Math.round(n / 1000) + "K";
+  function formatCompactTokens(n) {
+    if (!Number.isFinite(n) || n <= 0) return "0";
+    if (n < 1000) return `${Math.round(n)}`;
+    return `${Math.round(n / 1000)}K`;
   }
 
   function getContextTokens(evt) {
     if (Number.isFinite(evt?.contextTokens)) return evt.contextTokens;
-    if (Number.isFinite(evt?.inputTokens)) return evt.inputTokens;
     return 0;
   }
 
-  function updateContextDisplay(contextSize) {
+  function getContextWindowTokens(evt) {
+    if (Number.isFinite(evt?.contextWindowTokens)) return evt.contextWindowTokens;
+    return 0;
+  }
+
+  function getContextPercent(contextSize, contextWindowSize) {
+    if (!(contextSize > 0) || !(contextWindowSize > 0)) return null;
+    return (contextSize / contextWindowSize) * 100;
+  }
+
+  function formatContextPercent(percent, { precise = false } = {}) {
+    if (!Number.isFinite(percent)) return "";
+    if (precise) {
+      return `${percent.toFixed(1)}%`;
+    }
+    return `${Math.round(percent)}%`;
+  }
+
+  function updateContextDisplay(contextSize, contextWindowSize) {
     currentTokens = contextSize;
     if (contextSize > 0 && currentSessionId) {
-      contextTokens.textContent = formatTokens(contextSize);
+      const percent = getContextPercent(contextSize, contextWindowSize);
+      contextTokens.textContent = percent !== null
+        ? `${formatCompactTokens(contextSize)} live · ${formatContextPercent(percent)}`
+        : `${formatCompactTokens(contextSize)} live`;
+      contextTokens.title = percent !== null
+        ? `Live context: ${contextSize.toLocaleString()} / ${contextWindowSize.toLocaleString()} (${formatContextPercent(percent, { precise: true })})`
+        : `Live context: ${contextSize.toLocaleString()}`;
       contextTokens.style.display = "";
       compactBtn.style.display = "";
       dropToolsBtn.style.display = "";
@@ -1971,13 +2024,26 @@
   }
 
   function renderUsage(evt) {
+    const contextSize = getContextTokens(evt);
+    if (!(contextSize > 0)) return;
+    const contextWindowSize = getContextWindowTokens(evt);
+    const percent = getContextPercent(contextSize, contextWindowSize);
+    const output = evt.outputTokens || 0;
     const div = document.createElement("div");
     div.className = "usage-info";
-    const contextSize = getContextTokens(evt);
-    const output = evt.outputTokens || 0;
-    div.textContent = `${contextSize.toLocaleString()} context · ${output.toLocaleString()} out`;
+    const parts = [`${formatCompactTokens(contextSize)} live context`];
+    if (percent !== null) parts.push(`${formatContextPercent(percent, { precise: true })} window`);
+    if (output > 0) parts.push(`${formatCompactTokens(output)} out`);
+    div.textContent = parts.join(" · ");
+    const hover = [`Live context: ${contextSize.toLocaleString()}`];
+    if (contextWindowSize > 0) hover.push(`Context window: ${contextWindowSize.toLocaleString()}`);
+    if (Number.isFinite(evt?.inputTokens) && evt.inputTokens !== contextSize) {
+      hover.push(`Raw turn input: ${evt.inputTokens.toLocaleString()}`);
+    }
+    if (output > 0) hover.push(`Turn output: ${output.toLocaleString()}`);
+    div.title = hover.join("\n");
     messagesInner.appendChild(div);
-    updateContextDisplay(contextSize);
+    updateContextDisplay(contextSize, contextWindowSize);
   }
 
   function esc(s) {
@@ -2336,10 +2402,10 @@
     const requestId = existingRequestId || createRequestId();
 
     // Protect the message: save to localStorage before anything else
-    savePendingMessage(text, requestId);
+    const pendingTimestamp = savePendingMessage(text, requestId);
 
     // Render optimistic bubble BEFORE revoking image URLs
-    renderOptimisticMessage(text, pendingImages);
+    renderOptimisticMessage(text, pendingImages, pendingTimestamp);
 
     const msg = { action: "send", text: text || "(image)" };
     msg.requestId = requestId;
@@ -2428,10 +2494,12 @@
   // Prevents message loss on refresh, network failure, or server crash.
   function savePendingMessage(text, requestId) {
     if (!currentSessionId) return;
+    const timestamp = Date.now();
     localStorage.setItem(
       `pending_msg_${currentSessionId}`,
-      JSON.stringify({ text, requestId, timestamp: Date.now() }),
+      JSON.stringify({ text, requestId, timestamp }),
     );
+    return timestamp;
   }
   function clearPendingMessage(sessionId) {
     localStorage.removeItem(`pending_msg_${sessionId || currentSessionId}`);
@@ -2448,7 +2516,7 @@
     }
   }
 
-  function renderOptimisticMessage(text, images) {
+  function renderOptimisticMessage(text, images, timestamp = Date.now()) {
     if (emptyState.parentNode === messagesInner) emptyState.remove();
     // Remove any previous optimistic message
     const prev = document.getElementById("optimistic-msg");
@@ -2478,6 +2546,8 @@
       bubble.appendChild(span);
     }
 
+    appendMessageTimestamp(bubble, timestamp, "msg-user-time");
+
     wrap.appendChild(bubble);
     messagesInner.appendChild(wrap);
     scrollToBottom();
@@ -2495,6 +2565,8 @@
       span.textContent = pending.text;
       bubble.appendChild(span);
     }
+
+    appendMessageTimestamp(bubble, pending.timestamp, "msg-user-time");
 
     const actions = document.createElement("div");
     actions.className = "msg-failed-actions";
@@ -2584,6 +2656,7 @@
     tabProgress.classList.toggle("active", activeTab === "progress");
     sessionList.style.display = activeTab === "sessions" ? "" : "none";
     progressPanel.classList.toggle("visible", activeTab === "progress");
+    sessionListFooter.classList.toggle("hidden", activeTab !== "sessions");
     newSessionBtn.classList.toggle("hidden", activeTab === "progress");
     if (activeTab === "progress") {
       fetchSidebarState();

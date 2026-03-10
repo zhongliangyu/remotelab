@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { ingestRawMessage, loadBridge, mailboxPaths, summarizeQueueItem } from '../lib/agent-mailbox.mjs';
-import { assessForwardEmailSource, normalizeIp } from '../lib/agent-mail-http-bridge.mjs';
+import { matchesWebhookToken, normalizeIp } from '../lib/agent-mail-http-bridge.mjs';
 
 const HOST = process.env.AGENT_MAILBOX_HOST || '127.0.0.1';
 const PORT = Number.parseInt(process.env.AGENT_MAILBOX_PORT || '7694', 10);
@@ -40,6 +40,32 @@ function getClientIp(request) {
   return normalizeIp(request.socket.remoteAddress || '');
 }
 
+function trimString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function singleHeaderValue(value) {
+  return Array.isArray(value) ? trimString(value[0]) : trimString(value);
+}
+
+function currentBridgeConfig() {
+  return loadBridge(ROOT_DIR) || {};
+}
+
+function currentCloudflareWebhookToken() {
+  const bridge = currentBridgeConfig();
+  return trimString(process.env.AGENT_MAILBOX_CLOUDFLARE_WEBHOOK_TOKEN || bridge.cloudflareWebhookToken);
+}
+
+function decodeRawEmailPayload(payload) {
+  if (typeof payload.raw === 'string' && payload.raw.trim()) {
+    return payload.raw;
+  }
+  if (typeof payload.rawBase64 === 'string' && payload.rawBase64.trim()) {
+    return Buffer.from(payload.rawBase64, 'base64').toString('utf8');
+  }
+  return '';
+}
 
 function sendJson(response, statusCode, value) {
   const body = `${JSON.stringify(value, null, 2)}\n`;
@@ -80,8 +106,8 @@ function summarizePayload(payload) {
   };
 }
 
-function recordExternalMailValidation(mailboxItem, sourceAssessment) {
-  if (!sourceAssessment?.trusted || sourceAssessment.reason === 'loopback') {
+function recordExternalMailValidation(mailboxItem, sourceDetails = {}) {
+  if (trimString(sourceDetails.reason) === 'loopback') {
     return;
   }
 
@@ -101,9 +127,9 @@ function recordExternalMailValidation(mailboxItem, sourceAssessment) {
       lastExternalMailValidatedAt: validatedAt,
       lastExternalMail: summarizeQueueItem(mailboxItem),
       lastExternalSource: {
-        ip: sourceAssessment.ip,
-        matchedHostname: sourceAssessment.matchedHostname,
-        reason: sourceAssessment.reason,
+        ip: trimString(sourceDetails.ip),
+        matchedHostname: trimString(sourceDetails.matchedHostname),
+        reason: trimString(sourceDetails.reason),
       },
     },
     updatedAt: validatedAt,
@@ -112,23 +138,29 @@ function recordExternalMailValidation(mailboxItem, sourceAssessment) {
   writeFileSync(mailboxPaths(ROOT_DIR).bridgeFile, `${JSON.stringify(nextBridge, null, 2)}\n`, 'utf8');
 }
 
-async function handleWebhook(request, response) {
+async function handleCloudflareWebhook(request, response) {
+  const expectedToken = currentCloudflareWebhookToken();
   const clientIp = getClientIp(request);
-  const sourceAssessment = await assessForwardEmailSource(clientIp);
-  if (!sourceAssessment.trusted) {
+  if (!expectedToken) {
+    sendJson(response, 503, {
+      ok: false,
+      error: 'cloudflare_webhook_unconfigured',
+    });
+    return;
+  }
+
+  const providedToken = singleHeaderValue(request.headers.authorization || request.headers['x-bridge-token']);
+  if (!matchesWebhookToken(providedToken, expectedToken)) {
     appendJsonl(EVENTS_FILE, {
-      event: 'rejected_untrusted_source',
+      event: 'rejected_invalid_cloudflare_webhook_token',
       createdAt: nowIso(),
       clientIp,
-      sourceAssessment,
       path: request.url,
       method: request.method,
     });
     sendJson(response, 403, {
       ok: false,
-      error: 'untrusted_source',
-      clientIp,
-      reason: sourceAssessment.reason,
+      error: 'invalid_cloudflare_webhook_token',
     });
     return;
   }
@@ -145,7 +177,8 @@ async function handleWebhook(request, response) {
     return;
   }
 
-  if (typeof payload.raw !== 'string' || !payload.raw.trim()) {
+  const rawEmail = decodeRawEmailPayload(payload);
+  if (!rawEmail) {
     sendJson(response, 400, {
       ok: false,
       error: 'missing_raw_email',
@@ -154,21 +187,26 @@ async function handleWebhook(request, response) {
   }
 
   ensureBridgePaths();
-  const requestId = request.headers['cf-ray'] || `${Date.now()}`;
+  const requestId = request.headers['cf-ray'] || payload.requestId || `${Date.now()}`;
   const safeRequestId = String(Array.isArray(requestId) ? requestId[0] : requestId).replace(/[^a-zA-Z0-9._-]/g, '_');
   const webhookSnapshotPath = join(WEBHOOKS_DIR, `${safeRequestId}.json`);
   writeFileSync(webhookSnapshotPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
-  const mailboxItem = ingestRawMessage(payload.raw, `forward-email:${safeRequestId}`, ROOT_DIR, {
+  const mailboxItem = ingestRawMessage(rawEmail, `cloudflare-email:${safeRequestId}`, ROOT_DIR, {
     text: payload.text,
     html: payload.html,
+    provider: 'cloudflare_email_worker',
   });
-  recordExternalMailValidation(mailboxItem, sourceAssessment);
+  recordExternalMailValidation(mailboxItem, {
+    ip: clientIp,
+    matchedHostname: 'cloudflare_email_worker',
+    reason: clientIp === '127.0.0.1' || clientIp === '::1' ? 'loopback' : 'cloudflare_webhook_token',
+  });
+
   appendJsonl(EVENTS_FILE, {
-    event: 'accepted_forward_email_webhook',
+    event: 'accepted_cloudflare_email_webhook',
     createdAt: nowIso(),
     clientIp,
-    sourceAssessment,
     requestId: safeRequestId,
     webhookSnapshotPath,
     mailboxItem: summarizeQueueItem(mailboxItem),
@@ -178,7 +216,7 @@ async function handleWebhook(request, response) {
   sendJson(response, 200, {
     ok: true,
     trustedSource: true,
-    clientIp,
+    provider: 'cloudflare_email_worker',
     webhookSnapshotPath,
     mailboxItem: summarizeQueueItem(mailboxItem),
   });
@@ -195,13 +233,14 @@ const server = createServer(async (request, response) => {
         host: HOST,
         port: PORT,
         rootDir: ROOT_DIR,
+        cloudflareWebhookConfigured: Boolean(currentCloudflareWebhookToken()),
         time: nowIso(),
       });
       return;
     }
 
-    if (request.method === 'POST' && request.url === '/forward-email/webhook') {
-      await handleWebhook(request, response);
+    if (request.method === 'POST' && request.url === '/cloudflare-email/webhook') {
+      await handleCloudflareWebhook(request, response);
       return;
     }
 

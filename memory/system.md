@@ -121,6 +121,11 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - For `marked`, custom block + inline extensions are a clean way to consume tags like `<private>...</private>` and `<hide>...</hide>` so the UI hides them while the raw message text stays intact for history and model context.
 - After rendering, skip empty assistant bubbles; otherwise a response that only contains hidden blocks still leaves blank UI chrome behind.
 
+### Deferred Event Bodies Must Stay User-Triggered (2026-03-10)
+- If thinking/tool bodies are deferred behind `GET /api/sessions/:sessionId/events/:seq/body`, the frontend should only fetch them when the user explicitly expands the corresponding UI block.
+- Do not auto-hydrate deferred bodies just because a tool exited non-zero or because the session initially rendered; that silently defeats the lazy-loading contract and creates request bursts on session open.
+- For RemoteLab chat history, prefer the simple model: load the full normalized event list in one `GET /api/sessions/:sessionId/events`, keep heavy bodies deferred, and ignore pagination-style query params unless the product truly needs them.
+
 ### Private Skill Knowledge Stays Out Of Shared Memory (2026-03-06)
 - Repo-shared system memory must not store operational notes for private or org-specific skills/integrations, even if the pattern feels broadly useful inside one company's environment.
 - Put that knowledge in the skill's own docs when the skill is private/local, or in user-level memory on the relevant machine if it is an operator-specific workaround.
@@ -150,6 +155,8 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - If `getRun()` serves a cached copy, the UI can stay stuck on `running` or `accepted` after the tool already finished, because spool normalization writes can overwrite fresher terminal state from another process.
 - The same cache bug breaks Stop: a sidecar polling cached run state never sees `cancelRequested: true`, so `SIGTERM` is never sent to the tool process.
 - Read mutable run state from disk on every reconciliation / cancel poll, and merge status updates against the latest on-disk record so normalization metadata cannot regress terminal fields.
+- Reconciliation should also treat a present `result.json` as terminal evidence if `status.json` is still non-terminal; that state can happen if the sidecar writes the result file and then dies or is interrupted before its final status write lands.
+- When backfilling terminal state from `result.json`, prefer `result.cancelled` over a later `cancelRequested` flag. A user can press Stop after a successful run already completed, and that late cancel request must not rewrite a completed run into `cancelled`.
 - Reflection is valuable, but memory writes should be rare and selective. Persist only durable lessons with clear expected reuse.
 - Prefer editing, merging, or deleting existing memory instead of appending near-duplicate notes.
 - Memory hygiene should happen on a light cadence: daily during intense debugging or weekly otherwise.
@@ -188,9 +195,17 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 
 ### Transport Refactors Need A Stale-Tab Compatibility Window (2026-03-09)
 - When chat writes move from stateful WebSocket actions to HTTP, stale mobile tabs can keep the old JS loaded and will still optimistically gray a pending message even though they never hit the new HTTP send path.
+- In API request logs, repeated `400` responses on `POST /api/sessions/:id/messages` with `responseBytes: 33` are a strong fingerprint for stale clients hitting the new HTTP path without a `requestId` (`{"error":"requestId is required"}`).
 - During rollout, keep a thin compatibility shim for the old WebSocket action protocol (`list/create/attach/send/cancel/...`) that translates into the canonical session/run/event model instead of hard-failing every legacy action.
 - Legacy `create` should also bind the socket to the new session (and replay history) so an immediate stale-client `send` still lands even if that tab misses or delays a follow-up `attach`.
 - The safe migration pattern is: HTTP stays authoritative, realtime stays thin for new clients, and legacy sockets get temporary action bridging plus canonical event replay until browser tabs refresh naturally.
+
+### Public Mobile Shells Need Fingerprinted Assets And Non-Storable HTML (2026-03-10)
+- Cloudflare or the mobile browser may cache public JS/CSS/service-worker assets more aggressively than the origin's informal intent, even when local testing seems fine.
+- Do not rely on unversioned asset URLs plus `no-cache` HTML for operator-facing app shells. Serve HTML with `private, no-store, max-age=0, must-revalidate`, and fingerprint linked assets (`/chat.js?v=<build>`, `/manifest.json?v=<build>`, etc.).
+- Treat `sw.js` specially: use a versioned registration URL and send `no-store` so stale service workers do not survive a rollout window.
+- If the service worker is only needed for PWA installability or push, keep it fetch-passive: do not add asset-cache logic, clear Cache Storage on install/activate, and register with `updateViaCache: 'none'` so old worker-managed caches stop surviving browser rollout edges.
+- Exposing a tiny build marker in the UI and an `X-...-Build` response header makes stale-client reports much faster to confirm from mobile and `curl`.
 
 ### App-Centric Chat Still Needs Separate Policy And Run Layers (2026-03-08)
 - When generic chat and shared apps start converging, the clean model is: machine-owning agent kernel + auth principal + app policy + session/run instance, with optional environment leases.
@@ -234,6 +249,11 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - If real folder selection is removed but users still want visual hierarchy, the cheapest migration path is to extend the existing auto-title/summarizer step so it also emits a one-level `group` and a hidden `description`.
 - Persist `group` and `description` on session metadata, but keep the grouping purely presentational; do not reintroduce filesystem semantics or make the display group part of the actual cwd model.
 - For compatibility, let old sessions fall back to folder-based grouping, and let “new session inside group” carry the display group forward as a hint rather than as a hard path constraint.
+
+### Session Naming Prompts Need Layered Scope Hints (2026-03-10)
+- Auto-title/group prompts work best when they see three compact layers together: the latest turn, the current session's continuity summary, and a bounded sample of non-archived session metadata (`name`, `group`, `description`).
+- Treat `group` as a flexible project/domain container and `title` as the concrete subtask inside that group; bias strongly toward reusing an existing group before inventing a new one.
+- Prefer scope-routing memory such as `projects.md` over broad `global.md` for naming prompts, because it helps infer the top-level project without dragging large private memory into every rename call.
 
 ### Codex Noninteractive Runs Can Stall On Backend Websocket Timeouts (2026-03-08)
 - `codex exec` can appear to hang for minutes even on trivial prompts when its websocket to `wss://chatgpt.com/backend-api/codex/responses` times out.
@@ -309,3 +329,12 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - Provider usage fields are not directly comparable: Claude-style runtimes split cached prompt tokens into separate fields, while Codex-style runtimes report full prompt size in `input_tokens` and expose cached tokens only as a subset annotation.
 - The user-facing metric should therefore normalize to a canonical `contextTokens` value that represents the actual prompt/context window size loaded for the turn, not raw billable-token accounting.
 - Preserve provider-native raw `inputTokens` / `outputTokens` for debugging if needed, but label the UI around `context` so operators can judge compaction pressure and context-window saturation correctly.
+- For Codex CLI specifically, the most trustworthy local source for live context is the session JSONL `event_msg` with `payload.type === "token_count"`: use `info.last_token_usage.input_tokens` as live context, `info.total_token_usage.input_tokens` as cumulative/raw turn input, and `info.model_context_window` when present as the provider window size.
+- Codex stdout `turn.completed.usage.input_tokens` can grow with the agent loop and repeated tool calls, so it should not be treated as live context pressure in UI or auto-compaction decisions.
+- Once a clean `contextTokens` contract exists, do not keep compatibility fallbacks that silently reinterpret raw `inputTokens` as live context. Showing nothing is safer than showing a misleading number.
+- If the pressure contract is still unsettled, prefer disabling automatic compaction by default (`Inf`) rather than firing on a threshold that users may mistake for a trustworthy saturation signal.
+
+### Mobile Input Toolbars Should Scroll Horizontally When Controls Accumulate (2026-03-10)
+- In RemoteLab, the chat input control row naturally grows over time as tool/model/thinking/status/resume/compact actions are added.
+- On mobile, wrapping or clipping these controls is worse than horizontal scrolling because the right-side actions become unreachable precisely when they matter most.
+- A robust pattern is: keep the row single-line, split it into left/right flex groups with `min-width: max-content`, and make the parent row `overflow-x: auto` with touch scrolling enabled.

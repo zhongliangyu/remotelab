@@ -41,14 +41,18 @@ export function statusEvent(content) {
 }
 
 export function usageEvent({
-  contextTokens = 0,
-  inputTokens = 0,
-  outputTokens = 0,
+  contextTokens,
+  inputTokens,
+  outputTokens,
+  contextWindowTokens,
+  contextSource,
 } = {}) {
   return createEvent('usage', {
     role: 'system',
-    contextTokens,
-    inputTokens,
-    outputTokens,
+    ...(Number.isFinite(contextTokens) ? { contextTokens } : {}),
+    ...(Number.isFinite(inputTokens) ? { inputTokens } : {}),
+    ...(Number.isFinite(outputTokens) ? { outputTokens } : {}),
+    ...(Number.isFinite(contextWindowTokens) ? { contextWindowTokens } : {}),
+    ...(typeof contextSource === 'string' && contextSource ? { contextSource } : {}),
   });
 }

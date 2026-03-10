@@ -35,9 +35,9 @@ Phone Browser ──HTTPS──→ Cloudflare Tunnel ──→ chat-server.mjs (
 
 | Service | Port | Domain | Role |
 |---------|------|--------|------|
-| `chat-server.mjs` | **7690** | `claude-v2.jiujianian-dev-world.win` | **Production** — stable, released |
-| `chat-server.mjs` | **7692** | `ttest.jiujianian-dev-world.win` | **Test** — current development |
-| `auth-proxy.mjs` | **7681** | `claude.jiujianian-dev-world.win` | **Emergency terminal** — FROZEN, never modify |
+| `chat-server.mjs` | **7690** | production chat domain | **Production** — stable, released |
+| `chat-server.mjs` | **7692** | validation chat domain | **Test** — current development |
+| `auth-proxy.mjs` | **7681** | emergency terminal domain | **Emergency terminal** — FROZEN, never modify |
 
 **Dev workflow**: keep two chat-server planes active. Do all coding/conversation work on `7690`, do restart-heavy validation on `7692`, and only restart/reload `7690` after `7692` is verified.
 
@@ -71,7 +71,7 @@ remotelab/
 │   ├── push.mjs             # Web push notifications (83 lines)
 │   ├── models.mjs           # Available LLM models per tool (46 lines)
 │   ├── settings.mjs         # User preferences persistence (35 lines)
-│   ├── history.mjs          # Canonical append-only JSONL event history
+│   ├── history.mjs          # Canonical append-only per-event history + externalized bodies
 │   └── adapters/
 │       ├── claude.mjs       # Claude Code CLI output parser (201 lines)
 │       └── codex.mjs        # Codex CLI output parser (207 lines)
@@ -101,6 +101,7 @@ remotelab/
 │
 ├── docs/                    # User-facing documentation
 ├── notes/                   # Internal design & product thinking
+├── tests/                   # Scenario-style validation scripts
 └── memory/system.md         # System-level memory (shared, in repo)
 ```
 
@@ -112,7 +113,7 @@ All runtime data lives in `~/.config/remotelab/`:
 |------|---------|
 | `auth.json` | Access token + password hash |
 | `chat-sessions.json` | All session metadata |
-| `chat-history/` | Per-session event logs (JSONL) |
+| `chat-history/` | Per-session event store (`meta.json`, `context.json`, `events/*.json`, `bodies/*.txt`) |
 | `sidebar-state.json` | Progress tracking state |
 | `apps.json` | App definitions (templates) |
 
@@ -227,19 +228,15 @@ Shows all active sessions' status at a glance. Powered by `summarizer.mjs` — a
 - [x] Web push notifications
 
 ### P1 — Next Up
-- [ ] Visitor "new conversation" button (currently must re-click share link)
 - [ ] Expose AI-controlled session presentation (`title`, `group`, `description`) via session APIs, then validate the AI-owned session UX and consolidate current project-session TODOs into one dedicated prioritization session
-- [ ] Consolidate message transport/runtime architecture in one top-down design pass; use `notes/message-transport-architecture.md` as the temporary merge point for restart-safe runtime split, durable session semantics, and trigger-driven autonomy
 - [ ] Skills framework (file storage + loading mechanism)
 - [ ] Provider registry abstraction — open model selection, local JS/JSON provider config, no more Claude/Codex-only model wiring
 - [ ] Provider management UX — setup/settings should support preset enablement, simple GUI JSON providers, and advanced code mode
 - [ ] Session metadata enrichment beyond presentation (`project`, `status`, `priority`, `tags`)
-- [ ] Session isolation for Apps — different App sessions should NOT see each other's chat history (privacy risk: cross-session history leakage)
 
 ### P2 — Future
 - [ ] Deferred triggers (AI-initiated actions, scheduled follow-ups)
-- [ ] Autonomous execution (background sessions, event-driven resumption)
-- [ ] After the runtime/provider architecture refactor, expose RemoteLab control APIs through a first-class skill so the active model can inspect state and create/manage child sessions itself; use the currently selected model/provider to decide sub-agent or automation model routing while keeping those runs visible in the frontend
+- [ ] Session fork / conversation branching — create a child session from any chosen turn so side topics can continue in parallel without polluting the main thread; keep v1 lineage lightweight instead of adding a full tree UI immediately
 - [ ] Post-LLM output processing (layered output: decision / summary / details)
 - [ ] Revisit product naming/brand and possible repo rename after the product philosophy is more mature; treat this as intentionally deferred while the product itself is still taking shape
 
@@ -249,6 +246,8 @@ Shows all active sessions' status at a glance. Powered by `summarizer.mjs` — a
 
 | Doc | Path | When to read |
 |-----|------|-------------|
+| Project Architecture | `docs/project-architecture.md` | Top-down map of the shipped system, code locations, runtime flows, and current-vs-direction split |
+| External Message Protocol | `docs/external-message-protocol.md` | Canonical connector contract for email/GitHub/bot integrations using sessions, messages, runs, and events |
 | Core Philosophy | `notes/core-philosophy.md` | Design principles, App concept details, identity model, branding |
 | App-Centric Architecture | `notes/app-centric-architecture.md` | Consolidated architecture direction for treating default chat and shared Apps as one policy model |
 | Provider Architecture | `notes/provider-architecture.md` | Open provider/model abstraction, local JS/JSON extension path, migration plan |

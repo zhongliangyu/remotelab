@@ -192,6 +192,17 @@ async function submitMessage(port, sessionId, requestId, text = 'Run the fake to
   return res;
 }
 
+async function submitLegacyMessage(port, sessionId, text = 'Run the fake tool') {
+  const res = await request(port, 'POST', `/api/sessions/${sessionId}/messages`, {
+    text,
+    tool: 'fake-codex',
+    model: 'fake-model',
+    effort: 'low',
+  });
+  assert.equal(res.status, 202, 'legacy submit without requestId should succeed');
+  return res;
+}
+
 async function waitForRunTerminal(port, runId) {
   return waitFor(async () => {
     const res = await request(port, 'GET', `/api/runs/${runId}`);
@@ -210,8 +221,8 @@ async function waitForRunState(port, runId, expectedState) {
   }, `run ${runId} ${expectedState}`);
 }
 
-async function getEvents(port, sessionId, afterSeq = 0) {
-  const res = await request(port, 'GET', `/api/sessions/${sessionId}/events?afterSeq=${afterSeq}&limit=500`);
+async function getEvents(port, sessionId) {
+  const res = await request(port, 'GET', `/api/sessions/${sessionId}/events`);
   assert.equal(res.status, 200, 'events request should succeed');
   return res.json;
 }
@@ -252,10 +263,44 @@ async function phase2HttpCanonical() {
 
     const snapshot = await request(port, 'GET', `/api/sessions/${session.id}`);
     assert.equal(snapshot.status, 200);
-    const events = await getEvents(port, session.id, 0);
+    const events = await getEvents(port, session.id);
     assert.ok(events.events.some((event) => event.type === 'message' && event.role === 'user'));
     assert.ok(events.events.some((event) => event.type === 'message' && event.role === 'assistant'));
     console.log('phase2-http-canonical: ok');
+  } finally {
+    await stopServer(server);
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+async function phase2bLegacyHttpCompat() {
+  const { home } = setupTempHome();
+  const port = randomPort();
+  const server = await startServer({ home, port });
+  try {
+    const session = await createSession(port, {
+      name: 'Legacy HTTP',
+      group: 'Tests',
+      description: 'Missing requestId still works',
+    });
+    const submit = await submitLegacyMessage(port, session.id, 'Legacy client message');
+    assert.equal(typeof submit.json.requestId, 'string', 'server should mint a compatibility requestId');
+    assert.ok(submit.json.requestId.length > 0, 'compatibility requestId should not be empty');
+    assert.equal(submit.json.run.requestId, submit.json.requestId, 'run should persist the generated requestId');
+
+    const run = await waitForRunTerminal(port, submit.json.run.id);
+    assert.equal(run.requestId, submit.json.requestId, 'terminal run should keep the generated requestId');
+
+    const events = await getEvents(port, session.id);
+    assert.ok(
+      events.events.some((event) => event.type === 'message' && event.role === 'user' && event.requestId === submit.json.requestId),
+      'user message should be recorded with the generated requestId',
+    );
+    assert.ok(
+      events.events.some((event) => event.type === 'message' && event.role === 'assistant' && event.requestId === submit.json.requestId),
+      'assistant reply should be linked to the generated requestId',
+    );
+    console.log('phase2b-legacy-http-compat: ok');
   } finally {
     await stopServer(server);
     rmSync(home, { recursive: true, force: true });
@@ -326,7 +371,7 @@ async function phase5RestartSurvival() {
 
     const finalRun = await waitForRunTerminal(port, submit.json.run.id);
     assert.equal(finalRun.state, 'completed', 'detached run should survive restart');
-    const events = await getEvents(port, session.id, 0);
+    const events = await getEvents(port, session.id);
     assert.ok(events.events.some((event) => event.type === 'message' && event.role === 'assistant'));
     console.log('phase5-restart-survival: ok');
   } finally {
@@ -383,14 +428,14 @@ async function phase7EtagRevalidation() {
     );
     assert.equal(detail304.status, 304, 'unchanged session detail should revalidate to 304');
 
-    const events = await request(port, 'GET', `/api/sessions/${session.id}/events?afterSeq=0&limit=500`);
+    const events = await request(port, 'GET', `/api/sessions/${session.id}/events`);
     assert.equal(events.status, 200);
     assert.ok(events.headers.etag, 'session events should include an ETag');
 
     const events304 = await request(
       port,
       'GET',
-      `/api/sessions/${session.id}/events?afterSeq=0&limit=500`,
+      `/api/sessions/${session.id}/events`,
       null,
       { 'If-None-Match': events.headers.etag },
     );
@@ -412,7 +457,7 @@ async function phase7EtagRevalidation() {
     const eventsAfterRun = await request(
       port,
       'GET',
-      `/api/sessions/${session.id}/events?afterSeq=0&limit=500`,
+      `/api/sessions/${session.id}/events`,
       null,
       { 'If-None-Match': events.headers.etag },
     );
@@ -450,16 +495,116 @@ async function phase8CancelRecovery() {
   }
 }
 
+async function phase9StaleResultReconciliation() {
+  const { home, configDir } = setupTempHome();
+  const port = randomPort();
+  let server = await startServer({ home, port });
+  try {
+    const session = await createSession(port, { name: 'Stale', group: 'Tests', description: 'Stale result reconciliation' });
+    const submit = await submitMessage(port, session.id, 'req-stale');
+    const finishedRun = await waitForRunTerminal(port, submit.json.run.id);
+    assert.equal(finishedRun.state, 'completed', 'initial run should complete');
+
+    await stopServer(server);
+    server = null;
+
+    const sessionsPath = join(configDir, 'chat-sessions.json');
+    const runStatusPath = join(configDir, 'chat-runs', submit.json.run.id, 'status.json');
+    const sessions = JSON.parse(readFileSync(sessionsPath, 'utf8'));
+    const sessionRecord = sessions.find((entry) => entry.id === session.id);
+    assert.ok(sessionRecord, 'session record should exist');
+    sessionRecord.activeRunId = submit.json.run.id;
+    writeFileSync(sessionsPath, JSON.stringify(sessions, null, 2), 'utf8');
+
+    const status = JSON.parse(readFileSync(runStatusPath, 'utf8'));
+    status.state = 'running';
+    status.completedAt = null;
+    status.finalizedAt = null;
+    status.result = null;
+    status.failureReason = null;
+    status.cancelRequested = true;
+    status.cancelRequestedAt = new Date().toISOString();
+    writeFileSync(runStatusPath, JSON.stringify(status, null, 2), 'utf8');
+
+    server = await startServer({ home, port });
+
+    const cancel = await request(port, 'POST', `/api/sessions/${session.id}/cancel`);
+    assert.equal(cancel.status, 200, 'stale completed run should self-heal when cancel is pressed');
+    if (cancel.json.run) {
+      assert.equal(cancel.json.run.state, 'completed', 'stale completed run should reconcile to completed');
+    } else {
+      assert.equal(cancel.json.session.status, 'idle', 'stale completed run may self-heal before cancel executes');
+    }
+
+    const detail = await request(port, 'GET', `/api/sessions/${session.id}`);
+    assert.equal(detail.status, 200, 'session detail should still load');
+    assert.equal(detail.json.session.status, 'idle', 'session should no longer appear running');
+    assert.equal(detail.json.session.activeRunId, undefined, 'session should clear activeRunId after reconciliation');
+
+    const retry = await submitMessage(port, session.id, 'req-stale-retry', 'retry after stale completed run');
+    const retriedRun = await waitForRunTerminal(port, retry.json.run.id);
+    assert.equal(retriedRun.state, 'completed', 'session should accept a new run after stale-state reconciliation');
+    console.log('phase9-stale-result-reconciliation: ok');
+  } finally {
+    await stopServer(server);
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+async function phase10EventIndexContract() {
+  const { home } = setupTempHome();
+  const port = randomPort();
+  const server = await startServer({ home, port });
+  try {
+    const session = await createSession(port, { name: 'Event index', group: 'Tests', description: 'Full history + lazy bodies' });
+    const submit = await submitMessage(port, session.id, 'req-index-contract');
+    await waitForRunTerminal(port, submit.json.run.id);
+
+    const events = await request(port, 'GET', `/api/sessions/${session.id}/events?afterSeq=0&limit=1`);
+    assert.equal(events.status, 200, 'event history should load successfully');
+    assert.ok(Array.isArray(events.json.events), 'event history should return an events array');
+    assert.ok(events.json.events.length > 1, 'event history should ignore limit pagination and return the full event index');
+
+    const toolUse = events.json.events.find((event) => event.type === 'tool_use');
+    assert.ok(toolUse, 'tool use event should be present in the event index');
+    assert.equal(toolUse.toolInput, '', 'tool input body should be deferred from the event index');
+    assert.equal(toolUse.bodyAvailable, true, 'tool input should advertise a lazy body');
+    assert.equal(toolUse.bodyLoaded, false, 'tool input should stay unloaded in the event index');
+
+    const toolResult = events.json.events.find((event) => event.type === 'tool_result');
+    assert.ok(toolResult, 'tool result event should be present in the event index');
+    assert.equal(toolResult.output, '', 'tool result body should be deferred from the event index');
+    assert.equal(toolResult.bodyAvailable, true, 'tool result should advertise a lazy body');
+    assert.equal(toolResult.bodyLoaded, false, 'tool result should stay unloaded in the event index');
+
+    const toolUseBody = await request(port, 'GET', `/api/sessions/${session.id}/events/${toolUse.seq}/body`);
+    assert.equal(toolUseBody.status, 200, 'tool use body should load on demand');
+    assert.equal(toolUseBody.json.body.value, 'echo fake', 'tool use body should preserve the full inline payload');
+
+    const toolResultBody = await request(port, 'GET', `/api/sessions/${session.id}/events/${toolResult.seq}/body`);
+    assert.equal(toolResultBody.status, 200, 'tool result body should load on demand');
+    assert.equal(toolResultBody.json.body.value, 'fake', 'tool result body should preserve the full inline payload');
+
+    console.log('phase10-event-index-contract: ok');
+  } finally {
+    await stopServer(server);
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 const phase = process.argv[2] || 'all';
 const phases = {
   phase1: phase1Contract,
   phase2: phase2HttpCanonical,
+  phase2b: phase2bLegacyHttpCompat,
   phase3: phase3Storage,
   phase4: phase4RunnerThin,
   phase5: phase5RestartSurvival,
   phase6: phase6WsInvalidationOnly,
   phase7: phase7EtagRevalidation,
   phase8: phase8CancelRecovery,
+  phase9: phase9StaleResultReconciliation,
+  phase10: phase10EventIndexContract,
 };
 
 if (phase === 'all') {

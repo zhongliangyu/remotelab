@@ -3,6 +3,10 @@ import { spawn } from 'child_process';
 import { createInterface } from 'readline';
 import { createToolInvocation, prependImagePaths, resolveCommand, resolveCwd } from './process-runner.mjs';
 import {
+  buildCodexContextMetricsPayload,
+  readLatestCodexSessionMetrics,
+} from './codex-session-metrics.mjs';
+import {
   appendRunSpoolRecord,
   getRun,
   getRunManifest,
@@ -39,6 +43,33 @@ function captureResume(run, parsed) {
     };
   }
   return null;
+}
+
+async function appendCodexContextMetrics(runId) {
+  const current = await getRun(runId);
+  if (!current?.codexThreadId) return null;
+
+  const metrics = await readLatestCodexSessionMetrics(current.codexThreadId);
+  const payload = buildCodexContextMetricsPayload(metrics);
+  if (!payload) return null;
+
+  const line = JSON.stringify(payload);
+  await appendRunSpoolRecord(runId, {
+    ts: nowIso(),
+    stream: 'stdout',
+    line,
+    json: payload,
+  });
+
+  await updateRun(runId, (draft) => ({
+    ...draft,
+    contextInputTokens: metrics.contextTokens,
+    ...(Number.isInteger(metrics.contextWindowTokens)
+      ? { contextWindowTokens: metrics.contextWindowTokens }
+      : {}),
+  }));
+
+  return metrics;
 }
 
 async function main() {
@@ -160,6 +191,7 @@ async function main() {
       clearInterval(cancelTimer);
       const current = await getRun(runId) || run;
       const completedAt = nowIso();
+      await appendCodexContextMetrics(runId);
       const result = {
         completedAt,
         exitCode: code ?? 1,

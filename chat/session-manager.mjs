@@ -18,7 +18,7 @@ import {
 import { messageEvent, statusEvent } from './normalizer.mjs';
 import {
   triggerSummary,
-  triggerTitleSuggestion,
+  triggerSessionLabelSuggestion,
   renameSidebarEntry,
   updateSidebarEntry,
 } from './summarizer.mjs';
@@ -39,6 +39,7 @@ import {
   findRunByRequest,
   getRun,
   getRunManifest,
+  getRunResult,
   isTerminalRunState,
   listRunIds,
   materializeRunSpoolLine,
@@ -73,16 +74,37 @@ const INTERRUPTED_RESUME_PROMPT =
   'Please continue where you left off. The previous turn was interrupted by a RemoteLab server restart. '
   + 'Pick up from the last unfinished task without repeating completed work unless necessary.';
 
-const DEFAULT_AUTO_COMPACT_INPUT_TOKENS = 3_000_000;
+const DEFAULT_AUTO_COMPACT_CONTEXT_TOKENS = Number.POSITIVE_INFINITY;
+const DEFAULT_CONTEXT_WINDOW_HEADROOM_TOKENS = 25_000;
 
-function parsePositiveInt(value) {
-  const parsed = parseInt(value || '', 10);
+function parsePositiveIntOrInfinity(value) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) return null;
+  if (/^(inf|infinity)$/i.test(trimmed)) return Number.POSITIVE_INFINITY;
+  const parsed = parseInt(trimmed, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function getAutoCompactInputTokens() {
-  return parsePositiveInt(process.env.REMOTELAB_CONTEXT_COMPACT_TOKENS)
-    || DEFAULT_AUTO_COMPACT_INPUT_TOKENS;
+function getConfiguredAutoCompactContextTokens() {
+  return parsePositiveIntOrInfinity(process.env.REMOTELAB_LIVE_CONTEXT_COMPACT_TOKENS)
+    ?? DEFAULT_AUTO_COMPACT_CONTEXT_TOKENS;
+}
+
+function getAutoCompactContextTokens(run) {
+  const configured = getConfiguredAutoCompactContextTokens();
+  if (!Number.isFinite(configured)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const contextWindowTokens = Number.isInteger(run?.contextWindowTokens)
+    ? run.contextWindowTokens
+    : null;
+  if (!Number.isInteger(contextWindowTokens) || contextWindowTokens <= DEFAULT_CONTEXT_WINDOW_HEADROOM_TOKENS) {
+    return configured;
+  }
+  return Math.min(
+    configured,
+    Math.max(1_000, contextWindowTokens - DEFAULT_CONTEXT_WINDOW_HEADROOM_TOKENS),
+  );
 }
 
 const COMPACT_PROMPT = [
@@ -120,6 +142,39 @@ const runSessionsMetaMutation = createSerialTaskQueue();
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function deriveRunStateFromResult(run, result) {
+  if (!result || typeof result !== 'object') return null;
+  if (result.cancelled === true) {
+    return 'cancelled';
+  }
+  if ((result.exitCode ?? 1) === 0 && !result.error) {
+    return 'completed';
+  }
+  if (run?.cancelRequested === true && (((result.exitCode ?? 1) !== 0) || result.signal)) {
+    return 'cancelled';
+  }
+  return 'failed';
+}
+
+function deriveRunFailureReasonFromResult(run, result) {
+  if (!result || typeof result !== 'object') {
+    return run?.failureReason || null;
+  }
+  if (typeof result.error === 'string' && result.error.trim()) {
+    return result.error.trim();
+  }
+  if (result.cancelled === true) {
+    return null;
+  }
+  if (typeof result.signal === 'string' && result.signal) {
+    return `Process exited via signal ${result.signal}`;
+  }
+  if (Number.isInteger(result.exitCode)) {
+    return `Process exited with code ${result.exitCode}`;
+  }
+  return run?.failureReason || null;
 }
 
 function generateId() {
@@ -557,14 +612,18 @@ async function applyGeneratedSessionGrouping(sessionId, summaryResult) {
   });
 }
 
-function launchEarlyTitleSuggestion(sessionId, sessionMeta) {
+function launchEarlySessionLabelSuggestion(sessionId, sessionMeta) {
   const live = ensureLiveSession(sessionId);
   if (live.earlyTitlePromise) {
     return live.earlyTitlePromise;
   }
 
-  setRenameState(sessionId, 'pending');
-  const promise = triggerTitleSuggestion(
+  const shouldGenerateTitle = isSessionAutoRenamePending(sessionMeta);
+  if (shouldGenerateTitle) {
+    setRenameState(sessionId, 'pending');
+  }
+
+  const promise = triggerSessionLabelSuggestion(
     sessionMeta,
     async (newName) => {
       const currentSession = await getSession(sessionId);
@@ -573,15 +632,18 @@ function launchEarlyTitleSuggestion(sessionId, sessionMeta) {
     },
   )
     .then(async (result) => {
-      const currentSession = await getSession(sessionId);
-      if (currentSession && isSessionAutoRenamePending(currentSession)) {
-        setRenameState(
-          sessionId,
-          'failed',
-          result?.rename?.error || result?.error || 'No title generated',
-        );
-      } else {
-        clearRenameState(sessionId, { broadcast: true });
+      const grouped = await applyGeneratedSessionGrouping(sessionId, result);
+      const currentSession = grouped || await getSession(sessionId);
+      if (shouldGenerateTitle) {
+        if (currentSession && isSessionAutoRenamePending(currentSession)) {
+          setRenameState(
+            sessionId,
+            'failed',
+            result?.rename?.error || result?.error || 'No title generated',
+          );
+        } else {
+          clearRenameState(sessionId, { broadcast: true });
+        }
       }
       return result;
     })
@@ -601,9 +663,9 @@ async function queueContextCompaction(sessionId, session, run, { automatic = fal
   if (live.pendingCompact) return false;
   live.pendingCompact = true;
 
-  const autoCompactTokens = getAutoCompactInputTokens(run?.tool || session?.tool);
+  const autoCompactTokens = getAutoCompactContextTokens(run);
   const statusText = automatic
-    ? `Context window exceeded ${autoCompactTokens.toLocaleString()} input tokens — compacting conversation…`
+    ? `Live context exceeded ${autoCompactTokens.toLocaleString()} tokens — compacting conversation…`
     : 'Compacting session context…';
   const compactQueuedEvent = statusEvent(statusText);
   await appendEvent(sessionId, compactQueuedEvent);
@@ -629,8 +691,9 @@ async function queueContextCompaction(sessionId, session, run, { automatic = fal
 }
 
 async function maybeAutoCompact(sessionId, session, run, manifest) {
+  if (!Number.isFinite(getConfiguredAutoCompactContextTokens())) return false;
   if (!session || !run || manifest?.internalOperation) return false;
-  const autoCompactTokens = getAutoCompactInputTokens(run.tool || session.tool);
+  const autoCompactTokens = getAutoCompactContextTokens(run);
   if (!Number.isInteger(run.contextInputTokens) || run.contextInputTokens < autoCompactTokens) return false;
   return queueContextCompaction(sessionId, session, run, { automatic: true });
 }
@@ -854,11 +917,15 @@ async function syncDetachedRun(sessionId, runId) {
     const latestUsage = [...normalizedEvents].reverse().find((event) => event.type === 'usage');
     const contextInputTokens = Number.isInteger(latestUsage?.contextTokens)
       ? latestUsage.contextTokens
-      : latestUsage?.inputTokens;
-    if (Number.isInteger(contextInputTokens)) {
+      : null;
+    const contextWindowTokens = Number.isInteger(latestUsage?.contextWindowTokens)
+      ? latestUsage.contextWindowTokens
+      : null;
+    if (Number.isInteger(contextInputTokens) || Number.isInteger(contextWindowTokens)) {
       run = await updateRun(runId, (current) => ({
         ...current,
-        contextInputTokens,
+        ...(Number.isInteger(contextInputTokens) ? { contextInputTokens } : {}),
+        ...(Number.isInteger(contextWindowTokens) ? { contextWindowTokens } : {}),
       })) || run;
     }
   }
@@ -884,6 +951,25 @@ async function syncDetachedRun(sessionId, runId) {
 
   if (run.claudeSessionId || run.codexThreadId) {
     sessionChanged = await persistResumeIds(sessionId, run.claudeSessionId, run.codexThreadId) || sessionChanged;
+  }
+
+  if (!isTerminalRunState(run.state)) {
+    const result = await getRunResult(runId);
+    const inferredState = deriveRunStateFromResult(run, result);
+    const completedAt = typeof result?.completedAt === 'string' && result.completedAt
+      ? result.completedAt
+      : null;
+    if (inferredState && completedAt) {
+      run = await updateRun(runId, (current) => ({
+        ...current,
+        state: inferredState,
+        completedAt,
+        result,
+        failureReason: inferredState === 'failed'
+          ? deriveRunFailureReasonFromResult(current, result)
+          : null,
+      })) || run;
+    }
   }
 
   if (isTerminalRunState(run.state) && !run.finalizedAt) {
@@ -928,9 +1014,9 @@ export async function getSession(id) {
   return enrichSessionMeta(meta);
 }
 
-export async function getSessionEventsAfter(sessionId, afterSeq = 0, limit = 500) {
+export async function getSessionEventsAfter(sessionId, afterSeq = 0, options = {}) {
   await reconcileSessionMeta(await findSessionMeta(sessionId));
-  return readEventsAfter(sessionId, afterSeq, limit);
+  return readEventsAfter(sessionId, afterSeq, options);
 }
 
 export async function getRunState(runId) {
@@ -944,9 +1030,44 @@ export async function createSession(folder, tool, name, extra = {}) {
   const created = await runSessionsMetaMutation(async () => {
     const metas = await loadSessionsMeta();
     if (externalTriggerId) {
-      const existing = metas.find((meta) => meta.externalTriggerId === externalTriggerId && !meta.archived);
-      if (existing) {
-        return { session: existing, created: false };
+      const existingIndex = metas.findIndex((meta) => meta.externalTriggerId === externalTriggerId && !meta.archived);
+      if (existingIndex !== -1) {
+        const existing = metas[existingIndex];
+        const updated = { ...existing };
+        let changed = false;
+
+        const group = normalizeSessionGroup(extra.group || '');
+        if (group && updated.group !== group) {
+          updated.group = group;
+          changed = true;
+        }
+
+        const description = normalizeSessionDescription(extra.description || '');
+        if (description && updated.description !== description) {
+          updated.description = description;
+          changed = true;
+        }
+
+        const systemPrompt = typeof extra.systemPrompt === 'string' ? extra.systemPrompt : '';
+        if (systemPrompt && updated.systemPrompt !== systemPrompt) {
+          updated.systemPrompt = systemPrompt;
+          changed = true;
+        }
+
+        const completionTargets = sanitizeCompletionTargets(extra.completionTargets || []);
+        if (completionTargets.length > 0 && JSON.stringify(updated.completionTargets || []) !== JSON.stringify(completionTargets)) {
+          updated.completionTargets = completionTargets;
+          changed = true;
+        }
+
+        if (changed) {
+          updated.updatedAt = nowIso();
+          metas[existingIndex] = updated;
+          await saveSessionsMetaUnlocked(metas);
+          return { session: updated, created: false, changed: true };
+        }
+
+        return { session: existing, created: false, changed: false };
       }
     }
 
@@ -977,10 +1098,10 @@ export async function createSession(folder, tool, name, extra = {}) {
 
     metas.push(session);
     await saveSessionsMetaUnlocked(metas);
-    return { session, created: true };
+    return { session, created: true, changed: true };
   });
 
-  if (created.created && !created.session.visitorId) {
+  if ((created.created || created.changed) && !created.session.visitorId) {
     broadcastSessionsInvalidation();
   }
 
@@ -1225,11 +1346,17 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
     }
   }
 
-  if (!options.internalOperation && options.recordUserMessage !== false && isSessionAutoRenamePending(session)) {
-    launchEarlyTitleSuggestion(sessionId, {
+  const needsEarlySessionLabeling = isSessionAutoRenamePending(session)
+    || !session.group
+    || !session.description;
+
+  if (!options.internalOperation && options.recordUserMessage !== false && needsEarlySessionLabeling) {
+    launchEarlySessionLabelSuggestion(sessionId, {
       id: sessionId,
       folder: session.folder,
       name: session.name || '',
+      group: session.group || '',
+      description: session.description || '',
       autoRenamePending: session.autoRenamePending,
       tool: effectiveTool,
       model: options.model || undefined,
@@ -1288,7 +1415,10 @@ export async function cancelActiveRun(sessionId) {
   const session = await findSessionMeta(sessionId);
   if (!session?.activeRunId) return null;
   const run = await flushDetachedRunIfNeeded(sessionId, session.activeRunId) || await getRun(session.activeRunId);
-  if (!run || isTerminalRunState(run.state)) return null;
+  if (!run) return null;
+  if (isTerminalRunState(run.state)) {
+    return run;
+  }
   const updated = await requestRunCancel(run.id);
   if (updated) {
     broadcastSessionInvalidation(sessionId);

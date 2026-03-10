@@ -147,6 +147,7 @@ function mergeRunRecords(current, proposed) {
   merged.normalizedLineCount = pickMaxInt(current?.normalizedLineCount, proposed?.normalizedLineCount, 0);
   merged.normalizedByteOffset = pickMaxInt(current?.normalizedByteOffset, proposed?.normalizedByteOffset, 0);
   merged.contextInputTokens = pickMaxInt(current?.contextInputTokens, proposed?.contextInputTokens, null);
+  merged.contextWindowTokens = pickMaxInt(current?.contextWindowTokens, proposed?.contextWindowTokens, null);
 
   return merged;
 }
@@ -185,6 +186,7 @@ export function createRunRecord(input = {}) {
     lastNormalizedAt: input.lastNormalizedAt || null,
     failureReason: input.failureReason || null,
     contextInputTokens: Number.isInteger(input.contextInputTokens) ? input.contextInputTokens : null,
+    contextWindowTokens: Number.isInteger(input.contextWindowTokens) ? input.contextWindowTokens : null,
   };
 }
 

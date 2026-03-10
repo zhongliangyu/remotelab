@@ -117,6 +117,7 @@ export function createClaudeAdapter() {
               contextTokens: totalIn,
               inputTokens: u.input_tokens || 0,
               outputTokens: u.output_tokens || 0,
+              contextSource: 'provider_turn_usage',
             }));
           }
           events.push(statusEvent('completed'));

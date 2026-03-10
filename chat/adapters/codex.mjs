@@ -18,6 +18,8 @@ import {
  *   item.updated    — { type, item: ThreadItem }
  *   item.completed  — { type, item: ThreadItem }
  *   error           — { type, message }
+ *   remotelab.context_metrics — synthetic line injected by RemoteLab sidecar
+ *                               after reading Codex's session JSONL token_count data
  *
  * ThreadItem types:
  *   agent_message      — { id, type, text }
@@ -54,16 +56,19 @@ export function createCodexAdapter() {
           break;
 
         case 'turn.completed':
-          if (obj.usage) {
-            // Codex reports the full prompt/context size in input_tokens.
-            // cached_input_tokens is a cache-hit subset annotation, not extra context.
-            events.push(usageEvent({
-              contextTokens: obj.usage.input_tokens || 0,
-              inputTokens: obj.usage.input_tokens || 0,
-              outputTokens: obj.usage.output_tokens || 0,
-            }));
-          }
+          // Codex stdout usage is cumulative across the agent loop, so
+          // RemoteLab injects a later remotelab.context_metrics line instead.
           events.push(statusEvent('completed'));
+          break;
+
+        case 'remotelab.context_metrics':
+          events.push(usageEvent({
+            contextTokens: obj.contextTokens,
+            inputTokens: obj.inputTokens,
+            outputTokens: obj.outputTokens,
+            contextWindowTokens: obj.contextWindowTokens,
+            contextSource: obj.contextSource,
+          }));
           break;
 
         case 'turn.failed':

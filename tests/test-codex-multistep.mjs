@@ -8,7 +8,7 @@
  * - immediately call proc.stdin.end()
  * - read stdout via readline
  *
- * Usage: node test-codex-multistep.mjs
+ * Usage: node tests/test-codex-multistep.mjs
  */
 import { spawn, execFileSync } from 'child_process';
 import { createInterface } from 'readline';
