@@ -3,6 +3,7 @@
 Scenario-style validation scripts now live in this directory instead of the repo root.
 
 - Run the current smoke suite with `npm test`.
+- Pull requests run the same smoke suite automatically via GitHub Actions in `.github/workflows/ci.yml`.
 - Run a specific script with `node tests/<name>.mjs`.
 - `tests/chat` and `tests/lib` are symlinked import roots so existing relative test imports stay stable after the move.
 
