@@ -1,6 +1,6 @@
 # RemoteLab Setup Guide (AI-Executable)
 
-This document is written to be executed by an AI agent (Claude Code, etc.).
+This document is written to be executed by an AI agent (CodeX, Claude Code, etc.).
 
 Steps marked **[HUMAN]** cannot be automated — they require the user to interact with a browser or confirm something. At each `[HUMAN]` step, stop, explain what the user needs to do, and wait for confirmation before continuing.
 
@@ -8,13 +8,14 @@ Steps marked **[HUMAN]** cannot be automated — they require the user to intera
 
 ## What you're setting up
 
-Two services that auto-start on boot:
+The boot-managed owner stack:
 
 | Service | Port | Role |
 |---------|------|------|
 | `remotelab-chat` / `com.chatserver.claude` | 7690 | **Primary.** Chat UI — this is what the user accesses |
-| `remotelab-proxy` / `com.authproxy.claude` | 7681 | Terminal fallback (localhost only, emergency access) |
 | `remotelab-tunnel` / `com.cloudflared.tunnel` | — | Cloudflare tunnel — routes a public HTTPS domain to port 7690 |
+
+RemoteLab now ships with a single boot-managed chat plane on `7690`. Clean restart recovery removes the need for a separate permanent validation chat service.
 
 **Goal:** User opens `https://[subdomain].[domain]/?token=TOKEN` on their phone and gets a working chat UI.
 
@@ -50,6 +51,8 @@ At minimum, the AI doing setup should confirm these items with the user:
 3. Which reasoning default should be used (`thinking` / effort level) where supported
 4. Whether progress sidebar summarization should be enabled by default
 
+If multiple tools are installed and the user has no strong preference, prefer `CodeX` (`codex`) as the default built-in tool.
+
 ### macOS
 
 ```bash
@@ -62,7 +65,7 @@ which brew || echo "MISSING: install Homebrew first"
 node --version
 
 # At least one AI CLI tool
-which claude || which codex || which cline || echo "MISSING: install at least one AI CLI tool"
+which codex || which claude || which cline || echo "MISSING: install at least one AI CLI tool"
 
 # Check if remotelab is already installed via npm link
 which remotelab 2>/dev/null && echo "already linked" || echo "need to npm link"
@@ -77,14 +80,8 @@ uname -s   # must be Linux
 node --version || echo "MISSING: install Node.js"
 # Install: curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs
 
-# dtach (session persistence)
-which dtach || echo "MISSING: sudo apt-get install dtach"
-
-# ttyd (terminal-over-HTTP)
-which ttyd || echo "MISSING: see https://github.com/tsl0922/ttyd/releases"
-
 # At least one AI CLI tool
-which claude || which codex || which cline || echo "MISSING: install at least one AI CLI tool"
+which codex || which claude || which cline || echo "MISSING: install at least one AI CLI tool"
 ```
 
 ---
@@ -104,23 +101,12 @@ npm link   # makes `remotelab` available globally
 ### macOS only
 
 ```bash
-brew install dtach ttyd cloudflared
+brew install cloudflared
 ```
 
 ### Linux only
 
 ```bash
-# dtach
-sudo apt-get install -y dtach   # Debian/Ubuntu
-# or: sudo yum install -y dtach  # RHEL/CentOS
-
-# ttyd — try package manager first, fall back to GitHub binary
-sudo apt-get install -y ttyd 2>/dev/null || {
-  TTYD_VER=$(curl -s https://api.github.com/repos/tsl0922/ttyd/releases/latest | grep tag_name | cut -d'"' -f4)
-  curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VER}/ttyd.$(uname -m)" -o /tmp/ttyd
-  chmod +x /tmp/ttyd && sudo mv /tmp/ttyd /usr/local/bin/ttyd
-}
-
 # cloudflared (only needed for Cloudflare mode)
 curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg > /dev/null
 echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
@@ -130,8 +116,6 @@ sudo apt-get update && sudo apt-get install -y cloudflared
 Verify:
 ```bash
 which remotelab
-which dtach
-which ttyd
 which cloudflared   # only if using Cloudflare mode
 ```
 
@@ -280,26 +264,6 @@ Environment=NODE_ENV=production
 WantedBy=default.target
 EOF
 
-# auth proxy (fallback)
-cat > ~/.config/systemd/user/remotelab-proxy.service << EOF
-[Unit]
-Description=RemoteLab Auth Proxy
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=$HOME
-ExecStart=NODE_PATH_HERE REMOTELAB_DIR_HERE/auth-proxy.mjs
-Restart=always
-RestartSec=5
-StandardOutput=append:$HOME/.local/share/remotelab/logs/auth-proxy.log
-StandardError=append:$HOME/.local/share/remotelab/logs/auth-proxy.error.log
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=default.target
-EOF
-
 # cloudflared tunnel (only if using Cloudflare mode)
 cat > ~/.config/systemd/user/remotelab-tunnel.service << EOF
 [Unit]
@@ -340,22 +304,21 @@ loginctl enable-linger $USER
 ```bash
 mkdir -p ~/Library/Logs
 launchctl load ~/Library/LaunchAgents/com.chatserver.claude.plist
-launchctl load ~/Library/LaunchAgents/com.authproxy.claude.plist
 launchctl load ~/Library/LaunchAgents/com.cloudflared.tunnel.plist  # if Cloudflare mode
 sleep 3
-launchctl list | grep -E 'chatserver|authproxy|cloudflared'
+launchctl list | grep -E 'chatserver|cloudflared'
 # Column 1 should be a number (PID), not a dash.
 ```
 
 ### Linux
 
 ```bash
-systemctl --user enable remotelab-chat remotelab-proxy
-systemctl --user start remotelab-chat remotelab-proxy
+systemctl --user enable remotelab-chat
+systemctl --user start remotelab-chat
 systemctl --user enable remotelab-tunnel  # if Cloudflare mode
 systemctl --user start remotelab-tunnel   # if Cloudflare mode
 sleep 3
-systemctl --user status remotelab-chat remotelab-proxy
+systemctl --user status remotelab-chat
 ```
 
 Verify chat server is listening:
@@ -393,11 +356,19 @@ This interactive script handles phases 1–6 automatically, prompting for domain
 
 ## Troubleshooting
 
+### Storage keeps growing
+
+This is expected. RemoteLab keeps durable session history, run output, artifacts, and logs on disk so work survives disconnects and restarts.
+
+- Archiving a session does **not** delete its stored data.
+- RemoteLab does **not** auto-delete old sessions and does **not** provide a built-in one-click cleanup flow.
+- If disk usage starts to matter, periodically review old archived sessions and prune them manually from the terminal, or ask an AI operator to help you clean them up carefully.
+- The main storage directories are `~/.config/remotelab/chat-history/` and `~/.config/remotelab/chat-runs/`.
+
 ### macOS: Service shows dash (no PID) in launchctl list
 
 ```bash
 tail -50 ~/Library/Logs/chat-server.error.log
-tail -50 ~/Library/Logs/auth-proxy.error.log
 ```
 
 ### Linux: Service failed to start
@@ -413,14 +384,12 @@ tail -50 ~/.local/share/remotelab/logs/chat-server.error.log
 
 ```bash
 lsof -i :7690   # chat server
-lsof -i :7681   # auth proxy
 ```
 
 ### Restart a single service
 
 ```bash
 remotelab restart chat
-remotelab restart proxy
 remotelab restart tunnel
 remotelab restart all
 ```
@@ -450,10 +419,9 @@ dig @1.1.1.1 SUBDOMAIN.DOMAIN +short
 remotelab stop
 # macOS:
 rm ~/Library/LaunchAgents/com.chatserver.claude.plist
-rm ~/Library/LaunchAgents/com.authproxy.claude.plist
 rm ~/Library/LaunchAgents/com.cloudflared.tunnel.plist
 # Linux:
-systemctl --user disable --now remotelab-chat remotelab-proxy remotelab-tunnel
+systemctl --user disable --now remotelab-chat remotelab-tunnel
 rm ~/.config/systemd/user/remotelab-*.service
 systemctl --user daemon-reload
 # Both:

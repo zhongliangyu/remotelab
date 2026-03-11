@@ -1,27 +1,36 @@
 #!/usr/bin/env node
 import { randomBytes } from 'crypto';
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { AUTH_FILE } from './lib/config.mjs';
+import { selectCloudflaredAccessDomain } from './lib/cloudflared-config.mjs';
 
 const authFile = AUTH_FILE;
 const authDir = dirname(authFile);
 
-mkdirSync(authDir, { recursive: true });
+async function pathExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+await mkdir(authDir, { recursive: true });
 
 const token = randomBytes(32).toString('hex');
 
-writeFileSync(authFile, JSON.stringify({ token }, null, 2), 'utf8');
+await writeFile(authFile, JSON.stringify({ token }, null, 2), 'utf8');
 
 // Try to read real domain from cloudflared config
 let domain = null;
 const cfConfig = join(homedir(), '.cloudflared', 'config.yml');
-if (existsSync(cfConfig)) {
+if (await pathExists(cfConfig)) {
   try {
-    const content = readFileSync(cfConfig, 'utf8');
-    const match = content.match(/hostname:\s+(\S+)/);
-    if (match) domain = match[1];
+    const content = await readFile(cfConfig, 'utf8');
+    domain = await selectCloudflaredAccessDomain(content, { port: 7690 });
   } catch {}
 }
 
@@ -33,5 +42,5 @@ if (domain) {
   console.log(`  https://${domain}/?token=${token}`);
 } else {
   console.log(`\nAccess URL (local):`);
-  console.log(`  http://127.0.0.1:7681/?token=${token}`);
+  console.log(`  http://127.0.0.1:7690/?token=${token}`);
 }

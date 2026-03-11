@@ -375,12 +375,33 @@
     messagesInner.appendChild(div);
   }
 
+  function formatCompactTokens(n) {
+    if (!Number.isFinite(n) || n <= 0) return "0";
+    if (n < 1000) return `${Math.round(n)}`;
+    return `${Math.round(n / 1000)}K`;
+  }
+
   function renderUsage(event) {
+    const contextSize = Number.isFinite(event.contextTokens)
+      ? event.contextTokens
+      : 0;
+    if (!(contextSize > 0)) return;
+    const contextWindowSize = Number.isFinite(event.contextWindowTokens)
+      ? event.contextWindowTokens
+      : 0;
+    const percent = contextWindowSize > 0
+      ? (contextSize / contextWindowSize) * 100
+      : null;
+    const output = event.outputTokens || 0;
     const div = document.createElement("div");
     div.className = "usage-info";
-    const input = event.inputTokens || 0;
-    const output = event.outputTokens || 0;
-    div.textContent = `${input.toLocaleString()} in · ${output.toLocaleString()} out`;
+    const parts = [`${formatCompactTokens(contextSize)} live context`];
+    if (percent !== null) parts.push(`${percent.toFixed(1)}% window`);
+    if (output > 0) parts.push(`${formatCompactTokens(output)} out`);
+    div.textContent = parts.join(" · ");
+    div.title = percent !== null
+      ? `Live context: ${contextSize.toLocaleString()} / ${contextWindowSize.toLocaleString()} (${percent.toFixed(1)}%)`
+      : `Live context: ${contextSize.toLocaleString()}`;
     messagesInner.appendChild(div);
   }
 

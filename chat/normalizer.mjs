@@ -1,6 +1,6 @@
 let counter = 0;
 
-export function createEvent(type, fields = {}) {
+function createEvent(type, fields = {}) {
   counter += 1;
   return {
     type,
@@ -10,12 +10,8 @@ export function createEvent(type, fields = {}) {
   };
 }
 
-export function resetCounter() {
-  counter = 0;
-}
-
-export function messageEvent(role, content, images) {
-  const fields = { role, content };
+export function messageEvent(role, content, images, extra = {}) {
+  const fields = { role, content, ...extra };
   if (images && images.length > 0) fields.images = images;
   return createEvent('message', fields);
 }
@@ -40,6 +36,19 @@ export function statusEvent(content) {
   return createEvent('status', { role: 'system', content });
 }
 
-export function usageEvent(inputTokens, outputTokens) {
-  return createEvent('usage', { role: 'system', inputTokens, outputTokens });
+export function usageEvent({
+  contextTokens,
+  inputTokens,
+  outputTokens,
+  contextWindowTokens,
+  contextSource,
+} = {}) {
+  return createEvent('usage', {
+    role: 'system',
+    ...(Number.isFinite(contextTokens) ? { contextTokens } : {}),
+    ...(Number.isFinite(inputTokens) ? { inputTokens } : {}),
+    ...(Number.isFinite(outputTokens) ? { outputTokens } : {}),
+    ...(Number.isFinite(contextWindowTokens) ? { contextWindowTokens } : {}),
+    ...(typeof contextSource === 'string' && contextSource ? { contextSource } : {}),
+  });
 }

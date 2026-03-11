@@ -1,7 +1,7 @@
 import { homedir } from 'os';
-import { existsSync } from 'fs';
 import { MEMORY_DIR, SYSTEM_MEMORY_DIR } from '../lib/config.mjs';
 import { join } from 'path';
+import { pathExists } from './fs-utils.mjs';
 
 const BOOTSTRAP_MD = join(MEMORY_DIR, 'bootstrap.md');
 const GLOBAL_MD = join(MEMORY_DIR, 'global.md');
@@ -13,12 +13,14 @@ const SKILLS_MD = join(MEMORY_DIR, 'skills.md');
  * This is a lightweight pointer structure — tells the model how to activate
  * memory progressively instead of front-loading unrelated context.
  */
-export function buildSystemContext() {
+export async function buildSystemContext() {
   const home = homedir();
-  const hasBootstrap = existsSync(BOOTSTRAP_MD);
-  const hasGlobal = existsSync(GLOBAL_MD);
-  const hasProjects = existsSync(PROJECTS_MD);
-  const hasSkills = existsSync(SKILLS_MD);
+  const [hasBootstrap, hasGlobal, hasProjects, hasSkills] = await Promise.all([
+    pathExists(BOOTSTRAP_MD),
+    pathExists(GLOBAL_MD),
+    pathExists(PROJECTS_MD),
+    pathExists(SKILLS_MD),
+  ]);
   const isFirstTime = !hasBootstrap && !hasGlobal;
 
   let context = `You are an AI agent operating on this computer via RemoteLab. The user is communicating with you remotely (likely from a mobile phone). You have full access to this machine.
@@ -90,11 +92,10 @@ Skills are reusable capabilities (scripts, knowledge docs, SOPs). Treat ~/.remot
 - Use these blocks sparingly for model-visible notes that should stay out of the user-facing chat UI.
 
 ## RemoteLab self-hosting development
-- When working on RemoteLab itself, prefer two chat-server planes: 7690 is the stable coding/operator plane and 7692 is the restartable validation plane.
-- Do active coding and the main development conversation on 7690.
-- Use 7692 to verify changes, reproduce behavior, and restart freely; avoid treating it as the long-lived coding plane.
-- Avoid restarting the plane carrying your current conversation unless there is no alternative.
-- After 7692 passes validation, finish the current thought on 7690, then restart/reload 7690 only if needed.`;
+- When working on RemoteLab itself, use the normal \`7690\` chat-server as the primary plane.
+- Clean restarts are acceptable: treat them as transport interruptions with durable recovery, not as a reason to maintain a permanent validation plane.
+- If you launch any extra manual instance for debugging, keep it explicitly ad hoc rather than part of the default architecture.
+- Prefer verifying behavior through HTTP/state recovery after restart instead of assuming socket continuity.`;
 
   if (!hasBootstrap && hasGlobal) {
     context += `

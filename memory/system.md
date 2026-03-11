@@ -12,6 +12,26 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 
 ## Learnings
 
+### Feishu Bot Outbound Permission Trap (2026-03-11)
+- A Feishu self-built app can successfully receive `im.message.receive_v1` over persistent connection while still failing every outbound IM send.
+- The tell is Feishu API error `99991672` on `im.v1.message.create`, which means the app is missing an explicit outbound IM scope even if the basic bot setup looks complete.
+- When this happens, keep the connector code unchanged and ask the operator to enable one of the exact scopes Feishu names in the error, such as `im:message:send`, `im:message`, or `im:message:send_as_bot`, then replay the latest stored message.
+
+### Feishu Group Names Need Separate Tracking (2026-03-11)
+- The inbound message event `im.message.receive_v1` includes `chat_id` and `chat_type` but does not include a group name field.
+- If a bot needs human-friendly group names without calling the chat-detail API on every message, cache them from chat metadata signals such as `im.chat.member.bot.added_v1` and `im.chat.updated_v1`, which carry `name` and `i18n_names`.
+- If the bot starts after it was already added to a group and no metadata-change event has fired yet, an initial one-time chat-detail lookup is still needed to seed the cache.
+
+### Feishu @ Mentions Need Token Translation (2026-03-11)
+- In `im.message.receive_v1`, group-message text can contain placeholder tokens like `@_user_1` while the actual mentioned-user identity arrives separately in `message.mentions`.
+- If the connector forwards only the raw text preview, the model cannot tell who was mentioned; if outbound replies send those tokens back as plain text, Feishu shows the literal token instead of a real `@` mention.
+- Fix both directions together: render inbound prompt text with a token→name map from `message.mentions`, and translate reply tokens back into Feishu mention markup before calling `im.v1.message.create`.
+
+### Feishu Self-Built App Rollout Is Tenant-Scoped (2026-03-11)
+- A Feishu self-built app is a good fast path for local or same-tenant validation, but it is the wrong mental model for cross-tenant distribution.
+- If coworkers cannot search the bot or add it to groups, first check app availability scope, current version publish/apply status, and tenant policy before touching connector code.
+- For practical internal rollout, prefer a real team tenant over a purely personal self-test tenant; for external-tenant usage, move to a marketplace / distributable app flow.
+
 ### Memory Bootstrap Hygiene (2026-03-06)
 - Fresh or partially initialized RemoteLab setups may be missing `~/.remotelab/memory/skills.md`.
 - If session startup expects that file, create a minimal placeholder index instead of treating the absence as a hard failure.
@@ -26,6 +46,15 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 ### Testing Strategy for Self-Hosted Services (2026-03-06)
 - Never restart the server you're running on to test restart-survival features. Spin up a separate instance on a different port (e.g., 7694) and run the full test cycle there.
 - Use node WebSocket client for API testing — match the actual protocol (`action` field, attach-before-send flow).
+
+### Similar UI Totals Often Have Separate Code Paths (2026-03-11)
+- In RemoteLab, session row counts, folder counts, archive counts, and app-filter totals can look like one product concept while still coming from different frontend functions.
+- When a screenshot reports a "count bug", first identify the exact UI surface and trace that specific DOM/data path; fixing an adjacent counter can create false confidence while the real bug remains.
+- For the session sidebar specifically, per-session row counts live in `static/chat/ui.js`, while the app-filter totals are computed separately in `static/chat/bootstrap.js`.
+
+### Template-Literal Prompt Edits Can Break Server Boot (2026-03-11)
+- `chat/system-prompt.mjs` builds a large template literal, so inserting raw backticks inside the embedded prompt text creates a syntax error that prevents `chat-server.mjs` from starting.
+- After touching server-loaded modules or large inline prompt/template strings, run `node --check` before restart, then verify both the listener and a real HTTP endpoint; do not rely only on a helper script printing "restarted".
 
 ### Project Path Persistence (2026-03-06)
 - When a user has already confirmed a repo path for an active task, persist that path immediately into user-level memory or a task note.
@@ -121,6 +150,24 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - For `marked`, custom block + inline extensions are a clean way to consume tags like `<private>...</private>` and `<hide>...</hide>` so the UI hides them while the raw message text stays intact for history and model context.
 - After rendering, skip empty assistant bubbles; otherwise a response that only contains hidden blocks still leaves blank UI chrome behind.
 
+### External Reply Connectors Should Treat Empty Output As Silence (2026-03-11)
+- When a connector asks the model to output the exact outbound reply body, an empty assistant message should mean "send nothing", not "send a fallback apology".
+- Mark the inbound item as handled with a silent/no-reply status and log the reason; otherwise connector-level fallbacks override deliberate quiet-mode behavior and make response suppression unreliable.
+
+### External Reply Connectors Need Shared Reply Selection (2026-03-11)
+- Do not blindly publish the raw latest assistant `message` event for a run; provider adapters can append assistant-side artifacts after the real reply, such as Codex `todo_list` checklists.
+- Keep that selection logic out of the core chat-history/domain primitives. A better boundary is: chat core exposes raw normalized events, while connectors or other business-facing layers apply a shared helper library to choose the outbound reply they want.
+- A practical default rule is: skip known artifact kinds such as `todo_list`, and if the trailing assistant text is only a checklist block, fall back to the nearest earlier substantive assistant reply from the same run.
+
+### Post-Run Integrations Should Live Outside `chat/` (2026-03-11)
+- Business-specific side effects triggered by finished runs, such as outbound email delivery, should not live under the core `chat/` domain modules even when the chat server invokes them.
+- A cleaner split is: `chat/` owns sessions, runs, and event history; integration modules under `lib/` or connector-specific areas consume those primitives and perform provider-specific delivery work.
+
+### Deferred Event Bodies Must Stay User-Triggered (2026-03-10)
+- If thinking/tool bodies are deferred behind `GET /api/sessions/:sessionId/events/:seq/body`, the frontend should only fetch them when the user explicitly expands the corresponding UI block.
+- Do not auto-hydrate deferred bodies just because a tool exited non-zero or because the session initially rendered; that silently defeats the lazy-loading contract and creates request bursts on session open.
+- For RemoteLab chat history, prefer the simple model: load the full normalized event list in one `GET /api/sessions/:sessionId/events`, keep heavy bodies deferred, and ignore pagination-style query params unless the product truly needs them.
+
 ### Private Skill Knowledge Stays Out Of Shared Memory (2026-03-06)
 - Repo-shared system memory must not store operational notes for private or org-specific skills/integrations, even if the pattern feels broadly useful inside one company's environment.
 - Put that knowledge in the skill's own docs when the skill is private/local, or in user-level memory on the relevant machine if it is an operator-specific workaround.
@@ -138,6 +185,20 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - A startup rule like "read all memory files at the start of every session" is an architectural mismatch if the product goal is focus and bounded context; it turns retrieval into unconditional preload.
 
 ### Memory Writeback Must Be Sparse And Pruned (2026-03-06)
+
+### HTTP Reconciliation Must Not Spam Realtime (2026-03-09)
+- If HTTP reads reconcile detached-runner spool files into canonical history, do not emit WebSocket/SSE invalidations on every read path by default.
+- Only broadcast when the read actually materialized new durable state (new events, new status, terminal transition). Otherwise transport hints can create self-amplifying refresh loops.
+- A stronger steady-state pattern is: HTTP remains the source of truth, hot GET routes support ETag / `If-None-Match` revalidation, and WebSocket is reduced to a push-only invalidation hint.
+- In that model, correctness still does not depend on socket-only payloads, but convergence without realtime comes from manual refresh or the next HTTP interaction rather than a hidden polling loop.
+
+### Detached Run State Must Be Read Fresh Across Processes (2026-03-10)
+- `status.json` and `result.json` are shared mutable state between the chat-server control plane and detached runner sidecars, so process-local caches are not authoritative.
+- If `getRun()` serves a cached copy, the UI can stay stuck on `running` or `accepted` after the tool already finished, because spool normalization writes can overwrite fresher terminal state from another process.
+- The same cache bug breaks Stop: a sidecar polling cached run state never sees `cancelRequested: true`, so `SIGTERM` is never sent to the tool process.
+- Read mutable run state from disk on every reconciliation / cancel poll, and merge status updates against the latest on-disk record so normalization metadata cannot regress terminal fields.
+- Reconciliation should also treat a present `result.json` as terminal evidence if `status.json` is still non-terminal; that state can happen if the sidecar writes the result file and then dies or is interrupted before its final status write lands.
+- When backfilling terminal state from `result.json`, prefer `result.cancelled` over a later `cancelRequested` flag. A user can press Stop after a successful run already completed, and that late cancel request must not rewrite a completed run into `cancelled`.
 - Reflection is valuable, but memory writes should be rare and selective. Persist only durable lessons with clear expected reuse.
 - Prefer editing, merging, or deleting existing memory instead of appending near-duplicate notes.
 - Memory hygiene should happen on a light cadence: daily during intense debugging or weekly otherwise.
@@ -147,6 +208,11 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - In RemoteLab, the built-in boot prompt should stay a small pointer/index that tells the agent which memory files exist; do not inline full memory documents there.
 - Default context bloat usually comes from the agent explicitly reading large memory files and from accumulated chat/tool history, not from `buildSystemContext()` itself.
 - Practical rule: keep bootstrap memory tiny, split large notes into topical files, and read deep context on demand instead of every session.
+
+### Scope Routers Should Cover Non-Repo Domains Too (2026-03-09)
+- A routing file like `projects.md` fails if it models only code repositories; recurring scopes such as video production, recruiting, or writing then get pushed back into generic global memory.
+- Keep the router broad enough to cover both repos and non-repo task families, with trigger phrases and the next file, skill, or path to open.
+- The filename can stay `projects.md` for compatibility, but its job is scope routing rather than a strict repo catalog.
 
 ### Existing RemoteLab Push State Can Power One-Off Reminders (2026-03-06)
 - If a deployment already has active web-push subscriptions, you can send ad hoc reminders without touching app code by reading `~/.config/remotelab/vapid-keys.json` and `~/.config/remotelab/push-subscriptions.json` from a local script and using the repo's `web-push` dependency directly.
@@ -163,6 +229,25 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - Long-lived background processes are optional. Many "active agent" behaviors are better modeled as re-triggerable one-shot runs that resume from persisted provider state when a trigger fires.
 - A clean split is: control plane for auth/API/WebSocket/event replay, runtime manager for session leases/spawn-resume-cancel/watchers, and one durable store shared by both.
 - Optimize product promises around logical continuity (no lost work, replayable events, resumable runs) rather than transport continuity (the socket never dropped), because restarts and mobile-network churn make transport loss normal.
+
+### Async File Stores Need Keyed Serialization (2026-03-10)
+- When a Node app moves append-only session/run storage from sync FS calls to async FS calls, preserve correctness with a per-entity serialization queue (`sessionId`, `runId`, or similar) instead of firing writes concurrently.
+- The hidden failure mode is not just out-of-order events; concurrent async writes can also race metadata updates like `nextSeq`, `mtime`, status snapshots, and atomic temp-file renames.
+- A practical pattern is: keep reads async, keep writes async, but serialize mutating operations per logical record while allowing unrelated sessions/runs to proceed in parallel.
+
+### Transport Refactors Need A Stale-Tab Compatibility Window (2026-03-09)
+- When chat writes move from stateful WebSocket actions to HTTP, stale mobile tabs can keep the old JS loaded and will still optimistically gray a pending message even though they never hit the new HTTP send path.
+- In API request logs, repeated `400` responses on `POST /api/sessions/:id/messages` with `responseBytes: 33` are a strong fingerprint for stale clients hitting the new HTTP path without a `requestId` (`{"error":"requestId is required"}`).
+- During rollout, keep a thin compatibility shim for the old WebSocket action protocol (`list/create/attach/send/cancel/...`) that translates into the canonical session/run/event model instead of hard-failing every legacy action.
+- Legacy `create` should also bind the socket to the new session (and replay history) so an immediate stale-client `send` still lands even if that tab misses or delays a follow-up `attach`.
+- The safe migration pattern is: HTTP stays authoritative, realtime stays thin for new clients, and legacy sockets get temporary action bridging plus canonical event replay until browser tabs refresh naturally.
+
+### Public Mobile Shells Need Fingerprinted Assets And Non-Storable HTML (2026-03-10)
+- Cloudflare or the mobile browser may cache public JS/CSS/service-worker assets more aggressively than the origin's informal intent, even when local testing seems fine.
+- Do not rely on unversioned asset URLs plus `no-cache` HTML for operator-facing app shells. Serve HTML with `private, no-store, max-age=0, must-revalidate`, and fingerprint linked assets (`/chat.js?v=<build>`, `/manifest.json?v=<build>`, etc.).
+- Treat `sw.js` specially: use a versioned registration URL and send `no-store` so stale service workers do not survive a rollout window.
+- If the service worker is only needed for PWA installability or push, keep it fetch-passive: do not add asset-cache logic, clear Cache Storage on install/activate, and register with `updateViaCache: 'none'` so old worker-managed caches stop surviving browser rollout edges.
+- Exposing a tiny build marker in the UI and an `X-...-Build` response header makes stale-client reports much faster to confirm from mobile and `curl`.
 
 ### App-Centric Chat Still Needs Separate Policy And Run Layers (2026-03-08)
 - When generic chat and shared apps start converging, the clean model is: machine-owning agent kernel + auth principal + app policy + session/run instance, with optional environment leases.
@@ -196,7 +281,100 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - In transcript-driven video rough-cut workflows, a "kept content" review draft becomes unreadable if every same-utterance stutter trim is rendered as an explicit join marker.
 - A better default is to merge same-utterance micro-cuts into continuous prose and reserve visible `→ ✂️ →` markers for larger semantic joins, such as skipped whole utterances or section-level jumps.
 - Keep the fully annotated raw transcript as the safety net; let the kept-content draft optimize for readability and flow judgment.
+- When a long-running transformation needs user approval first, surface the review draft inline in chat as well as on disk; file-only handoff creates slow feedback loops, especially for remote/mobile users.
 
 ### Preference Slips Should Be Framed As Execution Failures, Not Memory Loss (2026-03-08)
 - When a user flags that a standing preference was broken, verify the memory record first and explicitly tell them whether the preference is still stored.
 - If the preference is present, describe the issue as a failure to follow stored instructions, apologize clearly, and restate the standing default so trust is repaired with evidence instead of vague reassurance.
+
+### Display-Only Session Grouping Can Reuse Auto-Naming (2026-03-08)
+- If real folder selection is removed but users still want visual hierarchy, the cheapest migration path is to extend the existing auto-title/summarizer step so it also emits a one-level `group` and a hidden `description`.
+- Persist `group` and `description` on session metadata, but keep the grouping purely presentational; do not reintroduce filesystem semantics or make the display group part of the actual cwd model.
+- For compatibility, let old sessions fall back to folder-based grouping, and let “new session inside group” carry the display group forward as a hint rather than as a hard path constraint.
+
+### Session Naming Prompts Need Layered Scope Hints (2026-03-10)
+- Auto-title/group prompts work best when they see three compact layers together: the latest turn, the current session's continuity summary, and a bounded sample of non-archived session metadata (`name`, `group`, `description`).
+- Treat `group` as a flexible project/domain container and `title` as the concrete subtask inside that group; bias strongly toward reusing an existing group before inventing a new one.
+- Prefer scope-routing memory such as `projects.md` over broad `global.md` for naming prompts, because it helps infer the top-level project without dragging large private memory into every rename call.
+
+### Codex Noninteractive Runs Can Stall On Backend Websocket Timeouts (2026-03-08)
+- `codex exec` can appear to hang for minutes even on trivial prompts when its websocket to `wss://chatgpt.com/backend-api/codex/responses` times out.
+- For unattended automations, do not assume Codex CLI is a reliable low-latency text-generation backend until a fresh smoke test proves connectivity in that environment.
+- Keep a deterministic non-model fallback path for critical background jobs such as triage, notifications, or watchdog tasks.
+
+### Repo-Local Agent Context Should Prefer AGENTS.md (2026-03-09)
+- For cross-agent portability, prefer `AGENTS.md` as the canonical repo-local instructions/context file.
+- If older tools still auto-load `CLAUDE.md` or another branded file, keep that file as a thin compatibility shim that points back to `AGENTS.md` instead of maintaining divergent copies.
+- Remote runtimes and system prompts should explicitly tell agents to look for `AGENTS.md` first and fall back to legacy tool-specific files only when needed.
+
+### Tunnel Health Checks Should Hit Public Login Pages Directly (2026-03-09)
+- For RemoteLab-style self-hosted apps behind auth, a lightweight external health check can target `/login` directly instead of `/`; this avoids redirect-specific false negatives while still proving DNS + edge + tunnel + app reachability.
+- Validate more than the status code: expect a `200` plus a stable HTML marker such as the sign-in page title so a generic CDN error page does not count as healthy.
+- Pair the external domain probe with a local `127.0.0.1` probe in the same job; when external fails but local succeeds, the likely fault domain is the tunnel, VPN, or upstream network rather than the app itself.
+
+### Healthy Ping Does Not Rule Out Codex Backend Failures (2026-03-09)
+- RemoteLab/Codex sessions can feel slow even when local network checks look perfect; ICMP ping to public hosts may stay low-latency with zero loss while backend requests to `https://chatgpt.com/backend-api/codex/responses` still fail intermittently.
+- When diagnosing user-visible slowness, inspect `~/Library/Logs/chat-server*.log` for `codex_api::endpoint::responses` errors and `Reconnecting...` events before blaming the user's LAN or Wi-Fi.
+
+### Auto-Rename Latency Can Be Hidden Behind The Main Run (2026-03-09)
+- If the final session title does not depend on the assistant's completed output, start a lightweight title-only model call immediately after persisting the user's message instead of waiting for the main run to exit.
+- Keep the post-run summarizer for progress/grouping and as a fallback, but let the rename path overlap the main task so the finished session usually already has its final title.
+- Guard early rename callbacks with both `autoRenamePending` and a per-attempt token so stale background results cannot overwrite a newer attempt or a manual rename.
+- If the background title/grouping job reads from canonical history, trigger it only after the new user event has been durably appended; otherwise first-turn jobs may see an empty history and silently skip.
+
+### Session Tests Can Race Background Summaries During Cleanup (2026-03-09)
+- Detached chat runs may still trigger post-exit summary work after the main run has finished; tests that delete the temp HOME/config tree immediately can cause noisy follow-up spawn failures.
+- In focused tests, either seed `group`/`description` so no summary is needed, or wait for the async summary to settle before removing the temp workspace.
+
+### Billed Turn Input Is Not The Same As Live Next-Turn Context (2026-03-10)
+- For Codex-style agent runs, a turn's reported `usage.input_tokens` can exceed the model's single-request context window because it reflects repeated internal calls and replayed prefixes across the agent loop, not one live prompt loaded all at once.
+- For compaction, rollover, or "start a new session" decisions, measure the assembled next-turn carry-forward context (or provider-rendered token count) instead of cumulative billed turn input.
+- Prompt caching reduces cost and latency only; it does not shrink effective context length or improve recall by itself.
+- For reasoning models, keep explicit headroom for reasoning and output. OpenAI recommends reserving at least 25k tokens, and long coding workflows are often healthier when compaction starts around ~200k carried tokens rather than near the hard window limit.
+
+### Web Push Retries Should Use Socket Timeouts And Temporary Backoff (2026-03-09)
+- When browser push endpoints intermittently fail with `ETIMEDOUT`, `ECONNRESET`, TLS socket setup errors, or other transport-level failures, treating them only as log noise causes repeated useless outbound attempts on every task completion.
+- Add a bounded socket timeout to `web-push.sendNotification()` and persist per-subscription failure metadata so transport failures back off for a while instead of hammering the same endpoint forever.
+- Keep `404` and `410` as permanent stale-subscription removals; use temporary backoff only for network-layer failures.
+
+### Cloudflare Tunnel Auth And Wrangler Auth Are Separate (2026-03-09)
+- A machine can have working `cloudflared` control via `~/.cloudflared/cert.pem` and tunnel credentials even when `npx wrangler whoami` is unauthenticated.
+- Before concluding that Cloudflare control is unavailable, check both surfaces separately: `cloudflared tunnel list` / `cloudflared tunnel info ...` for tunnel control, and `wrangler whoami` for Worker/API deploy auth.
+- This distinction matters for staged rollouts: tunnel/webhook exposure may already be possible while Email Routing or Worker deployment still needs a one-time operator login.
+
+### Email Replies Must Preserve Empty Subjects For Threading (2026-03-10)
+- For mailbox reply automation, do not synthesize a fallback subject like `Reply from Rowan` when the inbound email had no `Subject`.
+- Even with correct `In-Reply-To` and `References`, changing an empty subject into a new non-empty subject can make clients like Gmail open a fresh conversation instead of keeping the visible thread continuous.
+- Allow empty `Subject:` headers on reply-mode raw MIME sends; only require a subject for brand-new outbound emails that are not replying into an existing thread.
+
+### `cloudflared tunnel route dns` Can Mislead When A Default Config Pins Another Tunnel (2026-03-09)
+- If `~/.cloudflared/config.yml` already specifies a tunnel, `cloudflared tunnel route dns <tunnel> <hostname>` may create a DNS record pointing at the config-pinned tunnel instead of the tunnel name you expected.
+- After any `route dns` command, immediately verify the created CNAME target through the Cloudflare DNS API or `dig`; do not trust the command output alone.
+
+### macOS `timeout` Can Break Node Server Smoke Tests (2026-03-09)
+- On macOS, wrapping a Node process with `timeout` can trigger CoreFoundation fork-safety failures such as `The process has forked and you cannot use this CoreFoundation functionality safely`, and may even segfault before the real app behavior is visible.
+- For quick smoke tests of local Node servers on macOS, prefer `cmd & pid=$!; sleep N; ...; kill $pid` over `timeout cmd` when you only need to confirm startup logs or listening ports.
+
+### Invalidation-Only WebSockets Should Refresh The Smallest HTTP Surface (2026-03-09)
+- In RemoteLab's invalidation-only realtime model, a `session_invalidated` event should refresh only the affected session (`/api/sessions/:id`, plus `/events` when that session is open), not the entire owner session list.
+- Reserve whole-list refreshes like `sessions_invalidated` for collection-shape changes such as create, archive, or unarchive; rename/group/tool/status changes can be reconciled with a per-session refresh and local sidebar rerender.
+- Coalesce repeated per-session invalidations client-side so active runs do not fan out into bursts of overlapping sidebar requests.
+
+### Usage Metrics Should Normalize To Context Window Size (2026-03-10)
+- Provider usage fields are not directly comparable: Claude-style runtimes split cached prompt tokens into separate fields, while Codex-style runtimes report full prompt size in `input_tokens` and expose cached tokens only as a subset annotation.
+- The user-facing metric should therefore normalize to a canonical `contextTokens` value that represents the actual prompt/context window size loaded for the turn, not raw billable-token accounting.
+- Preserve provider-native raw `inputTokens` / `outputTokens` for debugging if needed, but label the UI around `context` so operators can judge compaction pressure and context-window saturation correctly.
+- For Codex CLI specifically, the most trustworthy local source for live context is the session JSONL `event_msg` with `payload.type === "token_count"`: use `info.last_token_usage.input_tokens` as live context, `info.total_token_usage.input_tokens` as cumulative/raw turn input, and `info.model_context_window` when present as the provider window size.
+- Codex stdout `turn.completed.usage.input_tokens` can grow with the agent loop and repeated tool calls, so it should not be treated as live context pressure in UI or auto-compaction decisions.
+- Once a clean `contextTokens` contract exists, do not keep compatibility fallbacks that silently reinterpret raw `inputTokens` as live context. Showing nothing is safer than showing a misleading number.
+- If the pressure contract is still unsettled, prefer disabling automatic compaction by default (`Inf`) rather than firing on a threshold that users may mistake for a trustworthy saturation signal.
+
+### Mobile Input Toolbars Should Scroll Horizontally When Controls Accumulate (2026-03-10)
+- In RemoteLab, the chat input control row naturally grows over time as tool/model/thinking/status/resume/compact actions are added.
+- On mobile, wrapping or clipping these controls is worse than horizontal scrolling because the right-side actions become unreachable precisely when they matter most.
+- A robust pattern is: keep the row single-line, split it into left/right flex groups with `min-width: max-content`, and make the parent row `overflow-x: auto` with touch scrolling enabled.
+
+### IM Connectors Should Ack Fast And Finish In Background (2026-03-10)
+- Chat-platform event subscriptions often require handlers to finish within a few seconds and may retry on timeout, so do not hold the provider callback open while waiting for a full agent run.
+- For local-first agent products, a provider's long-connection / SDK event mode can be the fastest connector path because it avoids public webhook setup, signature verification, and payload decryption.
+- A reliable pattern is: receive event -> dedupe / enqueue immediately -> acknowledge the provider -> run the canonical session/message/run flow in background -> publish the final assistant reply afterward.

@@ -88,6 +88,18 @@ body {
 .status-dot.rename-failed { background: var(--error); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 #statusText { font-size: 12px; color: var(--text-muted); }
+.session-list-footer {
+  padding: 2px 12px 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.68;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.session-list-footer.hidden { display: none; }
 
 /* ---- App container ---- */
 .app-container {
@@ -132,65 +144,32 @@ body {
 .sidebar-tab.active { color: var(--text); border-bottom-color: var(--text); }
 .sidebar-tab:hover:not(.active) { color: var(--text-secondary); }
 
+.sidebar-filters {
+  padding: 8px 8px 0;
+  flex-shrink: 0;
+}
+.sidebar-filters.hidden { display: none; }
+.sidebar-filter-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+}
+.sidebar-filter-select:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
 /* Progress panel */
 .progress-panel {
-  flex: 1; overflow-y: auto; padding: 8px;
-  display: none; flex-direction: column; gap: 6px;
+  flex: 1;
+  display: none;
 }
-.progress-panel.visible { display: flex; }
-.progress-card {
-  padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--bg-secondary); cursor: default;
-}
-.progress-card-header {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
-}
-.progress-card-name {
-  font-size: 12px; font-weight: 600; color: var(--text); flex: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.progress-card-folder {
-  font-size: 10px; color: var(--text-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.progress-card-bg {
-  font-size: 12px; color: var(--text-secondary); line-height: 1.45; margin-bottom: 5px;
-}
-.progress-card-action {
-  font-size: 11px; color: var(--text-muted); line-height: 1.4;
-  border-top: 1px solid var(--border); padding-top: 5px; margin-top: 2px;
-}
-.progress-card-time {
-  font-size: 10px; color: var(--text-muted); margin-top: 4px;
-}
-.progress-empty {
-  padding: 32px 16px; text-align: center; color: var(--text-muted);
-  font-size: 12px; line-height: 1.6;
-}
-.progress-running-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--success);
-  flex-shrink: 0; animation: pulse 1.5s infinite;
-}
-.progress-card-footer {
-  display: flex; align-items: center; justify-content: space-between; margin-top: 4px;
-}
-.progress-summarizing {
-  font-size: 10px; color: var(--text-muted); font-style: italic;
-  animation: pulse 1.5s infinite; margin-top: 4px;
-}
-.progress-toggle-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border-top: 1px solid var(--border); margin-top: auto; flex-shrink: 0;
-}
-.progress-toggle-label { font-size: 12px; color: var(--text-muted); }
-.progress-toggle-btn {
-  padding: 3px 10px; font-size: 11px; border-radius: 4px;
-  border: 1px solid var(--border); background: transparent;
-  color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.15s;
-}
-.progress-toggle-btn.active {
-  background: var(--bg-tertiary); border-color: var(--border-strong); color: var(--text);
-}
+.progress-panel.visible { display: block; }
 
 /* Folder groups */
 .folder-group { margin-bottom: 4px; }
@@ -214,14 +193,6 @@ body {
   padding: 1px 6px; border-radius: 10px;
 }
 .folder-group-header.collapsed + .folder-group-items { display: none; }
-.folder-add-btn {
-  background: var(--bg-tertiary); border: 1px solid var(--border);
-  color: var(--text-secondary); cursor: pointer;
-  font-size: 13px; padding: 1px 7px; border-radius: 5px; line-height: 1.5;
-  flex-shrink: 0; font-weight: 600;
-}
-.folder-add-btn:hover { background: var(--bg); border-color: var(--border-strong); color: var(--text); }
-.folder-add-btn:active { opacity: 0.7; }
 
 .session-item {
   padding: 7px 8px 7px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 1px;
@@ -238,6 +209,7 @@ body {
   font-size: 11px; color: var(--text-muted); margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.session-item-count { font-variant-numeric: tabular-nums; }
 .session-item-meta .status-running { color: var(--success); }
 .session-item-meta .status-interrupted { color: var(--warning); }
 .session-item-meta .status-done { color: #3b82f6; }
@@ -270,6 +242,16 @@ body {
 .archived-section-header.collapsed + .archived-items { display: none; }
 .archived-item { opacity: 0.65; }
 .archived-item:hover { opacity: 1; }
+.archived-empty {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.session-filter-empty {
+  padding: 12px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 
 /* Inline rename input */
 .session-rename-input {
@@ -347,6 +329,18 @@ body {
   max-width: 80%;
   color: var(--text);
 }
+.msg-timestamp {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.msg-user-time {
+  text-align: right;
+}
 .msg-images { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
 .msg-images img {
   max-width: 200px; max-height: 150px; border-radius: 8px; cursor: pointer;
@@ -398,6 +392,9 @@ body {
   color: var(--text);
   word-wrap: break-word;
   white-space: pre-wrap;
+}
+.msg-assistant-time {
+  margin-top: 10px;
 }
 
 /* Markdown rendered content */
@@ -536,6 +533,39 @@ body {
 }
 .thinking-block.collapsed .thinking-body { display: none; }
 
+.turn-collapse-drawer {
+  margin: 8px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+.turn-collapse-summary {
+  cursor: pointer;
+  padding: 9px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  user-select: none;
+  list-style: none;
+}
+.turn-collapse-summary::-webkit-details-marker { display: none; }
+.turn-collapse-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 7px;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.turn-collapse-drawer[open] .turn-collapse-summary::before {
+  transform: rotate(90deg);
+}
+.turn-collapse-drawer[open] .turn-collapse-summary {
+  border-bottom: 1px solid var(--border);
+}
+.turn-collapse-body {
+  padding: 10px 12px 4px;
+}
+
 /* Reasoning text inside thinking block */
 .reasoning {
   font-size: 12px; color: var(--text-secondary); font-style: italic;
@@ -625,9 +655,26 @@ body {
 }
 .input-wrapper:focus-within { border-color: #aaa; }
 .input-config-row {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 10px;
   padding: 8px 12px 6px;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.input-config-row::-webkit-scrollbar {
+  display: none;
+}
+.input-config-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: max-content;
+  flex-shrink: 0;
+}
+.input-config-group.right {
+  margin-left: auto;
 }
 .tool-select, .model-select, .effort-select {
   padding: 3px 7px; background: transparent; border: 1px solid var(--border);
@@ -649,6 +696,7 @@ body {
 }
 #contextTokens {
   font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .compact-btn {
   background: none; border: 1px solid var(--border); color: var(--text-muted);
@@ -911,7 +959,9 @@ body {
   .sidebar-collapse-btn { display: inline-flex; }
 
   .sidebar-overlay.collapsed .sidebar-header h2,
+  .sidebar-overlay.collapsed .sidebar-filters,
   .sidebar-overlay.collapsed .sidebar-list,
+  .sidebar-overlay.collapsed .session-list-footer,
   .sidebar-overlay.collapsed .new-session-btn { display: none; }
   .sidebar-overlay.collapsed .sidebar-header {
     justify-content: center; padding: 12px 4px;
@@ -945,6 +995,7 @@ body.visitor-mode .header #menuBtn { display: none !important; }
 <div class="header">
   <button class="header-btn" id="menuBtn" title="Sessions">&#9776;</button>
   <h1 id="headerTitle">RemoteLab Chat</h1>
+  <button class="header-share-btn" id="forkSessionBtn" title="Create an isolated copy of this session" style="display:none">Fork</button>
   <button class="header-share-btn" id="shareSnapshotBtn" title="Create a read-only snapshot link" style="display:none">Share</button>
   <span class="status-dot" id="statusDot"></span>
   <span id="statusText">disconnected</span>
@@ -963,8 +1014,14 @@ body.visitor-mode .header #menuBtn { display: none !important; }
         <button class="sidebar-tab active" id="tabSessions">Sessions</button>
         <button class="sidebar-tab" id="tabProgress">Progress</button>
       </div>
+      <div class="sidebar-filters" id="sidebarFilters">
+        <select class="sidebar-filter-select" id="appFilterSelect" aria-label="Filter sessions by app">
+          <option value="__all__">All Apps</option>
+        </select>
+      </div>
       <div class="sidebar-list" id="sessionList"></div>
       <div class="progress-panel" id="progressPanel"></div>
+      <div class="session-list-footer" id="sessionListFooter" title="Build {{BUILD_TITLE}}">Build {{BUILD_TITLE}}</div>
       <button class="new-session-btn" id="newSessionBtn">+ New Session</button>
     </aside>
   </div>
@@ -989,16 +1046,19 @@ body.visitor-mode .header #menuBtn { display: none !important; }
         <!-- Image preview inside wrapper -->
         <div class="img-preview-strip" id="imgPreviewStrip"></div>
         <div class="input-config-row">
-          <select class="tool-select" id="inlineToolSelect" disabled></select>
-          <select class="model-select" id="inlineModelSelect" disabled></select>
-          <button class="thinking-toggle" id="thinkingToggle" disabled>Thinking</button>
-          <select class="effort-select" id="effortSelect" disabled style="display:none"></select>
-          <button class="img-btn" id="imgBtn" disabled title="Attach image">&#128247;</button>
-          <span style="flex:1"></span>
-          <span id="contextTokens" style="display:none"></span>
-          <button class="compact-btn" id="resumeBtn" style="display:none" title="Resume the last turn interrupted by a server restart">Resume</button>
-          <button class="compact-btn" id="compactBtn" style="display:none" title="Ask model to summarize conversation, then reset context">Compact</button>
-          <button class="compact-btn" id="dropToolsBtn" style="display:none" title="Remove past tool results from context (no model call)">Drop tools</button>
+          <div class="input-config-group left">
+            <select class="tool-select" id="inlineToolSelect" disabled></select>
+            <select class="model-select" id="inlineModelSelect" disabled></select>
+            <button class="thinking-toggle" id="thinkingToggle" disabled>Thinking</button>
+            <select class="effort-select" id="effortSelect" disabled style="display:none"></select>
+            <button class="img-btn" id="imgBtn" disabled title="Attach image">&#128247;</button>
+          </div>
+          <div class="input-config-group right">
+            <span id="contextTokens" style="display:none"></span>
+            <button class="compact-btn" id="resumeBtn" style="display:none" title="Resume the last turn interrupted by a server restart">Resume</button>
+            <button class="compact-btn" id="compactBtn" style="display:none" title="Ask model to summarize conversation, then reset context">Compact</button>
+            <button class="compact-btn" id="dropToolsBtn" style="display:none" title="Remove past tool results from context (no model call)">Drop tools</button>
+          </div>
         </div>
         <div class="input-row">
           <input type="file" id="imgFileInput" accept="image/*" multiple hidden>
@@ -1095,8 +1155,14 @@ body.visitor-mode .header #menuBtn { display: none !important; }
   </div>
 </div>
 
-
+<script nonce="{{NONCE}}">window.__REMOTELAB_BUILD__ = {{BUILD_JSON}};</script>
 <script src="/marked.min.js" nonce="{{NONCE}}"></script>
-<script src="/chat.js" nonce="{{NONCE}}"></script>
+<script src="/chat/bootstrap.js" nonce="{{NONCE}}"></script>
+<script src="/chat/session-http.js" nonce="{{NONCE}}"></script>
+<script src="/chat/tooling.js" nonce="{{NONCE}}"></script>
+<script src="/chat/realtime.js" nonce="{{NONCE}}"></script>
+<script src="/chat/ui.js" nonce="{{NONCE}}"></script>
+<script src="/chat/compose.js" nonce="{{NONCE}}"></script>
+<script src="/chat/init.js" nonce="{{NONCE}}"></script>
 </body>
 </html>
