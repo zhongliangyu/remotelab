@@ -603,6 +603,7 @@ export async function handleRequest(req, res) {
         writeJson(res, outcome.duplicate ? 200 : 202, {
           requestId: requestId || outcome.run?.requestId || null,
           duplicate: outcome.duplicate,
+          queued: outcome.queued,
           run: outcome.run,
           session: outcome.session,
         });

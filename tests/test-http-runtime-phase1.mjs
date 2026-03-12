@@ -636,6 +636,49 @@ async function phase11ForkSession() {
   }
 }
 
+async function phase12QueuedMessageRouteContract() {
+  const { home } = setupTempHome();
+  const port = randomPort();
+  const server = await startServer({ home, port, delayMs: 1200 });
+  try {
+    const session = await createSession(port, {
+      name: 'Queued route',
+      group: 'Tests',
+      description: 'HTTP queued response contract',
+    });
+
+    const first = await submitMessage(port, session.id, 'req-queued-first', 'Keep the fake run busy');
+    await waitForRunState(port, first.json.run.id, 'running');
+
+    const queued = await submitMessage(port, session.id, 'req-queued-second', 'Follow-up while busy');
+    assert.equal(queued.status, 202, 'queued follow-up should still return 202');
+    assert.equal(queued.json.duplicate, false, 'new queued follow-up should not be marked duplicate');
+    assert.equal(queued.json.queued, true, 'route should expose queued follow-up state');
+    assert.equal(queued.json.run, null, 'queued follow-up should not create a new run immediately');
+    assert.equal(queued.json.session?.id, session.id, 'route should still return the refreshed session');
+    assert.equal(queued.json.session?.queuedMessageCount, 1, 'session payload should expose the queued follow-up count');
+
+    const duplicateQueued = await submitMessage(port, session.id, 'req-queued-second', 'Duplicate queued follow-up');
+    assert.equal(duplicateQueued.status, 200, 'duplicate queued follow-up should return idempotent 200');
+    assert.equal(duplicateQueued.json.duplicate, true, 'duplicate queued follow-up should report duplicate');
+    assert.equal(duplicateQueued.json.queued, true, 'duplicate queued follow-up should still report queued');
+    assert.equal(duplicateQueued.json.run, null, 'duplicate queued follow-up should not create a new run');
+
+    await waitForRunTerminal(port, first.json.run.id);
+    await waitFor(async () => {
+      const detail = await request(port, 'GET', `/api/sessions/${session.id}`);
+      if (detail.status !== 200) return false;
+      return detail.json.session?.status === 'idle'
+        && detail.json.session?.queuedMessageCount === 0;
+    }, 'queued follow-up should finish draining before cleanup', 12000);
+
+    console.log('phase12-queued-message-route-contract: ok');
+  } finally {
+    await stopServer(server);
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 const phase = process.argv[2] || 'all';
 const phases = {
   phase1: phase1Contract,
@@ -650,6 +693,7 @@ const phases = {
   phase9: phase9StaleResultReconciliation,
   phase10: phase10EventIndexContract,
   phase11: phase11ForkSession,
+  phase12: phase12QueuedMessageRouteContract,
 };
 
 if (phase === 'all') {

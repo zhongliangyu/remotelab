@@ -198,8 +198,15 @@ curl -sS \
 
 Response behavior:
 
-- `202` means the new run was accepted
+- `202` means the update was accepted, either as a new active run or as a queued follow-up
 - `200` means the same `requestId` was already seen and the call was treated as a duplicate
+
+Important response fields:
+
+- `duplicate` — idempotency result for this `requestId`
+- `queued` — `true` when the message was accepted into the session follow-up queue instead of starting a new run immediately
+- `run` — the new run when one started immediately, otherwise `null`
+- `session` — the refreshed session payload
 
 This means connectors should treat `requestId` as the idempotency key for one upstream update.
 
