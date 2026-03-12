@@ -1,3 +1,7 @@
+function renderUiIcon(name, className = "") {
+  return window.RemoteLabIcons?.render(name, { className }) || "";
+}
+
 // ---- Render functions ----
 function renderMessage(evt) {
   const role = evt.role || "assistant";
@@ -58,7 +62,7 @@ function renderToolUse(evt) {
   const header = document.createElement("div");
   header.className = "tool-header";
   header.innerHTML = `<span class="tool-name">${esc(evt.toolName || "tool")}</span>
-    <span class="tool-toggle">&#9654;</span>`;
+    <span class="tool-toggle">${renderUiIcon("chevron-right")}</span>`;
 
   const body = document.createElement("div");
   body.className = "tool-body";
@@ -399,21 +403,17 @@ function createActiveSessionItem(session) {
 
   div.innerHTML = `
     <div class="session-item-info">
-      <div class="session-item-name">${session.pinned ? '<span class="session-pin-badge" title="Pinned">&#128204;</span>' : ""}${esc(displayName)}</div>
+      <div class="session-item-name">${session.pinned ? `<span class="session-pin-badge" title="Pinned">${renderUiIcon("pinned")}</span>` : ""}${esc(displayName)}</div>
       <div class="session-item-meta">${metaHtml}</div>
     </div>
     <div class="session-item-actions">
-      <button class="session-action-btn pin${session.pinned ? " pinned" : ""}" title="${pinTitle}" data-id="${session.id}">&#128204;</button>
-      <button class="session-action-btn rename" title="Rename" data-id="${session.id}">&#9998;</button>
-      <button class="session-action-btn archive" title="Archive" data-id="${session.id}">&#8615;</button>
+      <button class="session-action-btn pin${session.pinned ? " pinned" : ""}" type="button" title="${pinTitle}" aria-label="${pinTitle}" data-id="${session.id}">${renderUiIcon(session.pinned ? "pinned" : "pin")}</button>
+      <button class="session-action-btn rename" type="button" title="Rename" aria-label="Rename" data-id="${session.id}">${renderUiIcon("edit")}</button>
+      <button class="session-action-btn archive" type="button" title="Archive" aria-label="Archive" data-id="${session.id}">${renderUiIcon("archive")}</button>
     </div>`;
 
   div.addEventListener("click", (e) => {
-    if (
-      e.target.classList.contains("pin")
-      || e.target.classList.contains("rename")
-      || e.target.classList.contains("archive")
-    ) {
+    if (e.target.closest(".session-action-btn")) {
       return;
     }
     attachSession(session.id, session);
@@ -481,7 +481,7 @@ function renderSessionList() {
     header.className =
       "folder-group-header" +
       (collapsedFolders[groupKey] ? " collapsed" : "");
-    header.innerHTML = `<span class="folder-chevron">&#9660;</span>
+    header.innerHTML = `<span class="folder-chevron">${renderUiIcon("chevron-down")}</span>
       <span class="folder-name" title="${esc(groupEntry.title)}">${esc(groupEntry.label)}</span>
       <span class="folder-count">${folderSessions.length}</span>`;
     header.addEventListener("click", (e) => {
@@ -530,7 +530,7 @@ function renderArchivedSection() {
   header.className = "archived-section-header";
   const isCollapsed = localStorage.getItem("archivedCollapsed") !== "false";
   if (isCollapsed) header.classList.add("collapsed");
-  header.innerHTML = `<span class="folder-chevron">&#9660;</span><span class="archived-label">Archive</span><span class="folder-count">${archivedSessions.length}</span>`;
+  header.innerHTML = `<span class="folder-chevron">${renderUiIcon("chevron-down")}</span><span class="archived-label">Archive</span><span class="folder-count">${archivedSessions.length}</span>`;
   header.addEventListener("click", () => {
     header.classList.toggle("collapsed");
     localStorage.setItem("archivedCollapsed", header.classList.contains("collapsed") ? "true" : "false");
@@ -561,10 +561,10 @@ function renderArchivedSection() {
           <div class="session-item-meta"><span title="${esc(shortFolder || groupInfo.title)}">${esc(groupInfo.label)}</span>${date ? ` · ${date}` : ""}</div>
         </div>
         <div class="session-item-actions">
-          <button class="session-action-btn restore" title="Restore" data-id="${s.id}">&#8617;</button>
+          <button class="session-action-btn restore" type="button" title="Restore" aria-label="Restore" data-id="${s.id}">${renderUiIcon("unarchive")}</button>
         </div>`;
       div.addEventListener("click", (e) => {
-        if (e.target.classList.contains("restore")) return;
+        if (e.target.closest(".session-action-btn")) return;
         attachSession(s.id, s);
         if (!isDesktop) closeSidebarFn();
       });
@@ -631,6 +631,26 @@ function closeSidebarFn() {
   sidebarOverlay.classList.remove("open");
 }
 
+function openSessionsSidebar() {
+  if (typeof switchTab === "function") {
+    switchTab("sessions");
+  }
+  openSidebar();
+  return true;
+}
+
+function createNewSessionShortcut({ closeSidebar = true } = {}) {
+  if (closeSidebar && !isDesktop) closeSidebarFn();
+  const tool = preferredTool || selectedTool || toolsList[0]?.id;
+  if (!tool) return false;
+  return dispatchAction({
+    action: "create",
+    folder: "~",
+    tool,
+    appId: activeAppFilter !== APP_FILTER_ALL_VALUE ? activeAppFilter : DEFAULT_APP_ID,
+  });
+}
+
 menuBtn.addEventListener("click", openSidebar);
 closeSidebar.addEventListener("click", closeSidebarFn);
 sidebarOverlay.addEventListener("click", (e) => {
@@ -648,15 +668,7 @@ document.addEventListener("visibilitychange", () => {
 
 // ---- New Session ----
 newSessionBtn.addEventListener("click", () => {
-  if (!isDesktop) closeSidebarFn();
-  const tool = preferredTool || selectedTool || toolsList[0]?.id;
-  if (!tool) return;
-  dispatchAction({
-    action: "create",
-    folder: "~",
-    tool,
-    appId: activeAppFilter !== APP_FILTER_ALL_VALUE ? activeAppFilter : DEFAULT_APP_ID,
-  });
+  createNewSessionShortcut();
 });
 
 // ---- Image handling ----
@@ -700,7 +712,10 @@ function renderImagePreviews() {
     imgEl.src = img.objectUrl;
     const removeBtn = document.createElement("button");
     removeBtn.className = "remove-img";
-    removeBtn.innerHTML = "&times;";
+    removeBtn.type = "button";
+    removeBtn.title = "Remove image";
+    removeBtn.setAttribute("aria-label", "Remove image");
+    removeBtn.innerHTML = renderUiIcon("close");
     removeBtn.onclick = () => {
       URL.revokeObjectURL(img.objectUrl);
       pendingImages.splice(i, 1);

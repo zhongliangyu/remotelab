@@ -1,4 +1,8 @@
 // ---- WebSocket ----
+function renderRealtimeIcon(name, className = "") {
+  return window.RemoteLabIcons?.render(name, { className }) || "";
+}
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -555,9 +559,9 @@ function openThinkingBlock() {
 
   const header = document.createElement("div");
   header.className = "thinking-header";
-  header.innerHTML = `<span class="thinking-icon">&#9881;</span>
+  header.innerHTML = `${renderRealtimeIcon("gear", "thinking-icon")}
     <span class="thinking-label">Thinking…</span>
-    <span class="thinking-chevron">&#9660;</span>`;
+    <span class="thinking-chevron">${renderRealtimeIcon("chevron-down")}</span>`;
 
   const body = document.createElement("div");
   body.className = "thinking-body";

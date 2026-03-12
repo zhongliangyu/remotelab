@@ -76,6 +76,7 @@ const staticMimeTypes = {
   'chat/bootstrap.js': 'application/javascript',
   'chat/session-http.js': 'application/javascript',
   'chat/tooling.js': 'application/javascript',
+  'chat/icons.js': 'application/javascript',
   'chat/realtime.js': 'application/javascript',
   'chat/ui.js': 'application/javascript',
   'chat/compose.js': 'application/javascript',

@@ -12,6 +12,10 @@
     ? snapshot.view
     : {};
 
+  function renderShareIcon(name, className = "") {
+    return window.RemoteLabIcons?.render(name, { className }) || "";
+  }
+
   let currentThinkingBlock = null;
   let inThinkingBlock = false;
 
@@ -175,7 +179,7 @@
 
     const header = document.createElement("div");
     header.className = "thinking-header";
-    header.innerHTML = `<span>⚙</span><span class="thinking-label">Thinking…</span><span class="thinking-chevron">&#9660;</span>`;
+    header.innerHTML = `${renderShareIcon("gear", "thinking-icon")}<span class="thinking-label">Thinking…</span><span class="thinking-chevron">${renderShareIcon("chevron-down")}</span>`;
 
     const body = document.createElement("div");
     body.className = "thinking-body";
@@ -272,7 +276,7 @@
 
     const header = document.createElement("div");
     header.className = "tool-header";
-    header.innerHTML = `<span class="tool-name">${esc(event.toolName || "tool")}</span><span class="tool-toggle">&#9654;</span>`;
+    header.innerHTML = `<span class="tool-name">${esc(event.toolName || "tool")}</span><span class="tool-toggle">${renderShareIcon("chevron-right")}</span>`;
 
     const body = document.createElement("div");
     body.className = "tool-body";
@@ -300,7 +304,7 @@
 
     const header = document.createElement("div");
     header.className = "tool-header expanded";
-    header.innerHTML = `<span class="tool-name">${esc(event.toolName || "tool")}</span><span class="tool-toggle">&#9654;</span>`;
+    header.innerHTML = `<span class="tool-name">${esc(event.toolName || "tool")}</span><span class="tool-toggle">${renderShareIcon("chevron-right")}</span>`;
 
     const body = document.createElement("div");
     body.className = "tool-body expanded";
