@@ -129,6 +129,10 @@ async function main() {
 
     const page = await request(port, 'GET', '/');
     assert.equal(page.status, 200, 'chat page should render for owner session');
+    assert.match(page.text, /<meta name="color-scheme" content="light dark">/);
+    assert.match(page.text, /<meta name="theme-color" content="#ffffff" media="\(prefers-color-scheme: light\)">/);
+    assert.match(page.text, /<meta name="theme-color" content="#1e1e1e" media="\(prefers-color-scheme: dark\)">/);
+    assert.match(page.text, /@media \(prefers-color-scheme: dark\)/);
     assert.match(page.text, /<script src="\/chat\/bootstrap\.js"/);
     assert.match(page.text, /<script src="\/chat\/session-http\.js"/);
     assert.match(page.text, /<script src="\/chat\/tooling\.js"/);
@@ -154,6 +158,13 @@ async function main() {
     const manifestJson = JSON.parse(manifest.text);
     assert.equal(manifestJson.display, 'standalone', 'manifest should still advertise standalone install mode');
     assert.equal('orientation' in manifestJson, false, 'manifest should not force an orientation policy in the installed PWA shell');
+
+    const loginPage = await request(port, 'GET', '/login', null, { Cookie: '' });
+    assert.equal(loginPage.status, 200, 'login page should render without auth');
+    assert.match(loginPage.text, /<meta name="color-scheme" content="light dark">/);
+    assert.match(loginPage.text, /<meta name="theme-color" content="#f5f5f5" media="\(prefers-color-scheme: light\)">/);
+    assert.match(loginPage.text, /<meta name="theme-color" content="#181818" media="\(prefers-color-scheme: dark\)">/);
+    assert.match(loginPage.text, /@media \(prefers-color-scheme: dark\)/);
 
     const apps = await request(port, 'GET', '/api/apps');
     assert.equal(apps.status, 200, 'owner apps endpoint should be available');

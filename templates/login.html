@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="theme-color" content="#f5f5f5">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
   <meta name="remotelab-build" content="{{BUILD_TITLE}}">
   <link rel="manifest" href="/manifest.json?v={{ASSET_VERSION}}">
   <link rel="icon" href="/favicon.ico" sizes="any">
@@ -13,11 +15,46 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v={{ASSET_VERSION}}">
   <title>RemoteLab — Sign In</title>
   <style nonce="{{NONCE}}">
+    :root {
+      color-scheme: light;
+      --bg: #f5f5f5;
+      --card: #ffffff;
+      --border: #e5e5e5;
+      --text: #111111;
+      --text-secondary: #888888;
+      --text-muted: #aaaaaa;
+      --error: #dc2626;
+      --error-bg: #fef2f2;
+      --button-bg: #111111;
+      --button-text: #ffffff;
+      --focus-border: #111111;
+      --shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #181818;
+        --card: #1f1f1f;
+        --border: #3c3c3c;
+        --text: #d4d4d4;
+        --text-secondary: #9b9b9b;
+        --text-muted: #747474;
+        --error: #ff6b6b;
+        --error-bg: #3a1f1f;
+        --button-bg: #d4d4d4;
+        --button-text: #181818;
+        --focus-border: #9cdcfe;
+        --shadow: 0 1px 6px rgba(0,0,0,0.4);
+      }
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: -apple-system, system-ui, 'Segoe UI', sans-serif;
-      background: #f5f5f5;
+      background: var(--bg);
+      color: var(--text);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -29,31 +66,31 @@
     }
 
     .card {
-      background: #fff;
-      border: 1px solid #e5e5e5;
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 12px;
       padding: 32px 28px 24px;
       width: 100%;
       max-width: 360px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      box-shadow: var(--shadow);
     }
 
     .logo {
       font-size: 16px;
       font-weight: 600;
-      color: #111;
+      color: var(--text);
       margin-bottom: 4px;
     }
 
     .tagline {
       font-size: 13px;
-      color: #888;
+      color: var(--text-secondary);
       margin-bottom: 24px;
     }
 
     .error {
-      background: #fef2f2;
-      color: #dc2626;
+      background: var(--error-bg);
+      color: var(--error);
       border-radius: 8px;
       padding: 9px 12px;
       font-size: 13px;
@@ -66,7 +103,7 @@
       display: block;
       font-size: 11px;
       font-weight: 600;
-      color: #888;
+      color: var(--text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.05em;
       margin-bottom: 5px;
@@ -76,13 +113,13 @@
     input[type=password] {
       display: block;
       width: 100%;
-      border: 1px solid #e5e5e5;
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 12px;
       font-size: 14px;
       font-family: inherit;
-      color: #111;
-      background: #fff;
+      color: var(--text);
+      background: var(--card);
       outline: none;
       -webkit-appearance: none;
       transition: border-color 0.1s;
@@ -91,7 +128,7 @@
 
     input[type=text]:focus,
     input[type=password]:focus {
-      border-color: #111;
+      border-color: var(--focus-border);
     }
 
     .mono {
@@ -102,8 +139,8 @@
     .btn {
       display: block;
       width: 100%;
-      background: #111;
-      color: #fff;
+      background: var(--button-bg);
+      color: var(--button-text);
       border: none;
       border-radius: 8px;
       padding: 11px;
@@ -124,17 +161,17 @@
 
     .switch a {
       font-size: 13px;
-      color: #888;
+      color: var(--text-secondary);
       text-decoration: none;
     }
 
-    .switch a:hover { color: #111; }
+    .switch a:hover { color: var(--text); }
 
     .build-stamp {
       margin-top: 14px;
       text-align: center;
       font-size: 10px;
-      color: #aaa;
+      color: var(--text-muted);
       user-select: text;
     }
   </style>
