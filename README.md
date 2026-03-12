@@ -40,6 +40,7 @@ The important architectural assumptions are:
 - recover long-running work after control-plane restarts
 - let the agent auto-title and auto-group sessions in the sidebar
 - paste screenshots directly into the chat
+- let the UI follow your system light/dark appearance automatically
 - create immutable read-only share snapshots
 - create App links for visitor-scoped entry flows
 
