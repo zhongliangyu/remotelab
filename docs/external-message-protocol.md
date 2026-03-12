@@ -128,6 +128,14 @@ Useful optional fields for connectors:
 - `systemPrompt` — source-specific guidance for this session
 - `externalTriggerId` — stable dedupe key for the upstream thread
 
+For recurring owner-side automations, prefer treating the connector as an Automation App:
+
+- create a normal RemoteLab App for the automation's identity and prompt
+- use that App's `id`, `name`, and `systemPrompt` when creating/reusing the review session
+- keep one stable `externalTriggerId` per automation thread so review stays in one durable session
+
+See `automation-apps.md` for the higher-level product pattern.
+
 Example:
 
 ```bash

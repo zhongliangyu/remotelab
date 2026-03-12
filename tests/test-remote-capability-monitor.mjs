@@ -42,6 +42,23 @@ const releaseSource = {
   baseWeight: 2,
 };
 
+const happyItem = {
+  title: 'slopus/happy-cli releases: v0.18.0',
+  headline: 'slopus/happy-cli releases: v0.18.0',
+  link: 'https://github.com/slopus/happy-cli/releases/tag/v0.18.0',
+  publishedAt: '2026-03-10T00:43:03.000Z',
+  summary: 'Add push notifications, Codex mode support, and permission handling improvements for mobile remote control.',
+  publisher: 'GitHub',
+};
+
+const happySource = {
+  id: 'slopus-happy-cli-releases',
+  name: 'slopus/happy-cli releases',
+  type: 'atom',
+  target: 'happy',
+  baseWeight: 2,
+};
+
 const rssItems = parseFeedItems('google_news_rss', rssFixture, newsSource);
 assert.equal(rssItems.length, 1);
 assert.equal(rssItems[0].publisher, 'DevOps.com');
@@ -65,10 +82,16 @@ assert.ok(releaseAnalysis.proposals.some((proposal) => /Detached run queues/i.te
 assert.ok(releaseAnalysis.proposals.some((proposal) => /Batch permission inboxes/i.test(proposal)));
 assert.ok(releaseAnalysis.proposals.some((proposal) => /Voice briefings/i.test(proposal)));
 
+const happyAnalysis = analyzeItem(happyItem, happySource);
+assert.equal(happyAnalysis.interesting, true);
+assert.ok(happyAnalysis.reasons.some((reason) => /direct Happy signal/i.test(reason)));
+assert.ok(happyAnalysis.proposals.some((proposal) => /Actionable notifications/i.test(proposal)));
+assert.ok(happyAnalysis.proposals.some((proposal) => /Batch permission inboxes/i.test(proposal)));
+
 const deduped = dedupeItems([newsAnalysis, { ...newsAnalysis, sourceId: 'duplicate-source', score: newsAnalysis.score - 1 }]);
 assert.equal(deduped.length, 1);
 
-const proposals = summarizeProposals([newsAnalysis, releaseAnalysis]);
+const proposals = summarizeProposals([newsAnalysis, releaseAnalysis, happyAnalysis]);
 assert.ok(proposals.length >= 3);
 assert.ok(proposals[0].count >= 1);
 

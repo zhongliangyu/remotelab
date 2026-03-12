@@ -1,87 +1,106 @@
-# Remote Capability Monitor (Prompt-First Local Rollout)
+# Remote Capability Monitor
 
-This document is the contract for asking an AI agent to set up the recurring product-intelligence watcher on the local machine.
+The remote capability monitor is a recurring RemoteLab automation App that scouts the remote-control coding-agent space and feeds the result back into a reviewable RemoteLab session.
 
-The human should usually only approve missing logins or decide the source and notification policy once near the start. Everything else should stay inside the conversation with the AI.
+It is meant to answer a focused question continuously:
 
-## Copy this prompt
+- what are direct competitors and adjacent tools shipping for remote control of local coding agents,
+- what changed recently,
+- and which of those changes are worth adapting inside RemoteLab.
 
-```text
-I want you to set up the RemoteLab capability monitor on this machine.
+## Primary tracked surfaces
 
-Follow `docs/remote-capability-monitor.md` in this repository as the rollout contract.
-Keep the workflow inside this chat.
-Before doing work, collect every missing input in one message so I can answer once.
-Do every automatable step yourself.
-After my reply, continue autonomously and only stop for true `[HUMAN]` steps or final completion.
-When you stop, tell me exactly what I need to decide or authorize, and how you'll validate the result afterward.
-```
+The monitor is designed to follow exact, machine-readable sources where possible.
 
-## One-round input handoff
+Current examples:
 
-The AI should try to collect this packet in one early exchange:
+- `slopus/happy`
+- `slopus/happy-cli`
+- `anthropics/claude-code`
+- `Claude Code Remote Control` news coverage
+- `openai/codex`
 
-- which competitors, feeds, or adjacent tools matter most
-- whether the rollout is dry-run only or should send notifications
-- which notifier channels are allowed
-- the desired schedule if the monitor should become recurring
+The `Happy` project matters here because it is an explicit remote-control product surface:
 
-## What the monitor answers
+- `slopus/happy` — mobile and web client for Claude Code and Codex
+- `slopus/happy-cli` — local CLI bridge / wrapper for remote control of local coding tools
 
-The monitor continuously answers a narrow question set:
+## How it fits RemoteLab
 
-- what new signals are appearing around phone-first control of coding agents
-- what adjacent tools like `Claude Code` and `Codex` are shipping
-- which capability patterns are worth copying into RemoteLab
+This monitor should not stop at local logs or standalone notifications.
 
-## [HUMAN] steps
+The intended flow is:
 
-1. Decide which competitors, source feeds, or adjacent surfaces matter if the AI cannot infer them confidently.
-2. Approve or finish notification-provider auth if the notifier depends on a browser or external login.
-3. Confirm whether the rollout should remain dry-run only or move to scheduled notifications.
+1. fetch and score source updates
+2. write a local report and JSON summary
+3. create or reuse a stable RemoteLab review session under an automation App
+4. submit the digest into that session
+5. let the AI produce the review/proposal inside RemoteLab
+6. optionally notify the owner with a deep link into that session
 
-## AI execution contract
+That makes the real review surface a normal RemoteLab session instead of an external dashboard.
 
-- keep shared logic in `scripts/remote-capability-monitor.mjs`
-- gather source and notification policy in one early handoff so the operator can step away after replying once
-- write machine-local config to `~/.config/remotelab/remote-capability-monitor/config.json`
-- tune `sources`, `bootstrapHours`, `reportDir`, and `notification` locally rather than hardcoding operator details in the repo
-- run a bootstrap dry-run first:
+## App pattern
 
-```bash
-node scripts/remote-capability-monitor.mjs \
-  --config ~/.config/remotelab/remote-capability-monitor/config.json \
-  --bootstrap-hours 336 \
-  --dry-run \
-  --verbose
-```
+A good monitor rollout uses a dedicated App, for example `Agent Radar`, with:
 
-- review the first report in chat, then run normal mode or `--force-notify` if needed
-- if recurring rollout is wanted, create a small local wrapper plus scheduler instead of embedding machine-local scheduling inside the repo
+- a system prompt focused on competitive/product judgment
+- a stable session identity via `externalTriggerId`
+- one recurring review thread for the automation
 
-## Local config contract
+This keeps the automation:
 
-Shared logic lives in `scripts/remote-capability-monitor.mjs`. Machine-local schedule, channels, and source tuning live outside the repo.
+- reviewable
+- resumable
+- easy to follow up on
+- grouped cleanly in the owner UI
 
-Config shape:
+## Shared vs local split
+
+Shared logic lives in the repo:
+
+- `scripts/remote-capability-monitor.mjs`
+
+Machine-local setup stays outside the repo:
+
+- source tuning
+- notifier channels
+- scheduler setup
+- auth/token files
+- concrete App/session IDs for that machine
+
+## Local config shape
+
+Typical local config includes:
 
 ```json
 {
-  "bootstrapHours": 168,
+  "bootstrapHours": 72,
   "reportDir": "~/.remotelab/research/remote-capability-monitor",
   "notification": {
     "notifierPath": "~/.remotelab/scripts/send-multi-channel-reminder.mjs",
     "channels": []
   },
+  "remotelab": {
+    "baseUrl": "http://127.0.0.1:7690",
+    "authFile": "~/.config/remotelab/auth.json",
+    "sessionFolder": "~/code/remotelab",
+    "session": {
+      "appId": "app_...",
+      "externalTriggerId": "automation:agent-radar:remote-capability-scout"
+    }
+  },
   "sources": []
 }
 ```
 
+## Source types
+
 Supported source types:
 
-- `google_news_rss` with `query`
-- `rss` with `url`
-- `atom` with `url`
+- `google_news_rss`
+- `rss`
+- `atom`
 
 Per-source tuning can include:
 
@@ -93,21 +112,17 @@ Per-source tuning can include:
 - `mustMatchAll`
 - `lowConfidence`
 
-## Outputs and success state
+## Outputs
 
-Typical machine-local outputs are:
+Typical outputs are:
 
 - state in `~/.config/remotelab/remote-capability-monitor/`
 - reports in `~/.remotelab/research/remote-capability-monitor/`
-- optional notifications via the operator's local notifier config
+- a stable RemoteLab review session for the automation
+- optional deep-link notifications
 
-Each healthy run writes:
+## Operational rule
 
-- a timestamped Markdown report
-- a timestamped JSON summary
-- `latest.md`
-- `latest.json`
+When the monitor is connected to a RemoteLab review session, that session should be treated as the primary review surface.
 
-## Tuning note
-
-Some competitor names may be ambiguous in public search feeds. When that happens, keep them in a low-confidence bucket and rely on stronger product-specific or official feed sources until the exact site or repo anchor is known.
+Notifications are helpful, but they should point back to the session rather than replace it.

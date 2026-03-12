@@ -617,7 +617,7 @@ function formatTimestamp(value) {
   return new Date(parsed).toISOString();
 }
 
-function buildSummaryJson({ startedAt, firstRun, sourceResults, allInteresting, pendingInteresting, reportPaths, notificationResult }) {
+function buildSummaryJson({ startedAt, firstRun, sourceResults, allInteresting, pendingInteresting, reportPaths, notificationResult, sessionResult }) {
   return {
     startedAt,
     firstRun,
@@ -637,11 +637,12 @@ function buildSummaryJson({ startedAt, firstRun, sourceResults, allInteresting, 
     })),
     latestReportPath: reportPaths.latestMarkdownPath,
     latestJsonPath: reportPaths.latestJsonPath,
+    session: sessionResult,
     notification: notificationResult,
   };
 }
 
-function renderReport({ startedAt, firstRun, sourceResults, allInteresting, pendingInteresting, latestSummaryPath }) {
+function renderReport({ startedAt, firstRun, sourceResults, allInteresting, pendingInteresting, latestSummaryPath, sessionResult }) {
   const focusItems = pendingInteresting.length > 0 ? pendingInteresting : allInteresting.slice(0, 5);
   const proposalSummary = summarizeProposals(focusItems);
   const lines = [
@@ -656,6 +657,12 @@ function renderReport({ startedAt, firstRun, sourceResults, allInteresting, pend
 
   if (latestSummaryPath) {
     lines.push(`- Latest JSON summary: ${latestSummaryPath}`);
+  }
+
+  if (sessionResult?.sessionId) {
+    lines.push(`- Review session: ${sessionResult.sessionId}`);
+    lines.push(`- Review session URL: ${sessionResult.sessionUrl}`);
+    lines.push(`- Review run state: ${sessionResult.runState || 'unknown'}`);
   }
 
   const sourceErrors = sourceResults.filter((result) => result.error);
@@ -752,6 +759,244 @@ async function collectSourceItems(source, { firstRun, bootstrapHours }) {
   };
 }
 
+async function requestJson(baseUrl, pathname, { method = 'GET', cookie = '', body = undefined, redirect = 'follow' } = {}) {
+  const headers = {
+    Accept: 'application/json, text/plain;q=0.9, */*;q=0.8',
+  };
+  let payload;
+  if (cookie) headers.Cookie = cookie;
+  if (body !== undefined) {
+    payload = JSON.stringify(body);
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(new URL(pathname, normalizeBaseUrl(baseUrl)).toString(), {
+    method,
+    headers,
+    body: payload,
+    redirect,
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {}
+  return { response, text, json };
+}
+
+async function authenticateOwner(baseUrl, authFile) {
+  const auth = await readJson(expandHome(authFile), null);
+  const token = trimString(auth?.token);
+  if (!token) {
+    throw new Error(`Missing owner token in ${expandHome(authFile)}`);
+  }
+
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/?token=${encodeURIComponent(token)}`, {
+    method: 'GET',
+    redirect: 'manual',
+  });
+  const sessionCookie = trimString(response.headers.get('set-cookie'))
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('session_token='));
+  if (!sessionCookie) {
+    throw new Error(`Owner auth failed (${response.status})`);
+  }
+  return sessionCookie;
+}
+
+async function loadAutomationApp(baseUrl, appId, cookie) {
+  const result = await requestJson(baseUrl, '/api/apps', { cookie });
+  if (!result.response.ok || !Array.isArray(result.json?.apps)) {
+    throw new Error(result.json?.error || result.text || `Failed to load apps (${result.response.status})`);
+  }
+  return result.json.apps.find((app) => app?.id === appId) || null;
+}
+
+function buildSessionDigestMessage({
+  runAt,
+  firstRun,
+  pendingInteresting,
+  allInteresting,
+  sourceResults,
+  reportPaths,
+}) {
+  const focusItems = pendingInteresting.length > 0 ? pendingInteresting : allInteresting.slice(0, 5);
+  const proposalSummary = summarizeProposals(focusItems);
+  const successfulSources = sourceResults.filter((result) => !result.error);
+  const lines = [
+    'Source: Remote capability monitor',
+    `Cycle: ${formatTimestamp(runAt)}`,
+    `Mode: ${firstRun ? 'bootstrap' : 'incremental'}`,
+    'Focus: RemoteLab Live / remote control for local coding agents',
+    '',
+    'Tracked sources this cycle:',
+  ];
+
+  for (const result of successfulSources) {
+    lines.push(`- ${result.sourceName} (${result.itemCount || 0} recent item${result.itemCount === 1 ? '' : 's'})`);
+  }
+
+  const failedSources = sourceResults.filter((result) => result.error);
+  if (failedSources.length > 0) {
+    lines.push('');
+    lines.push('Source errors:');
+    for (const result of failedSources) {
+      lines.push(`- ${result.sourceName}: ${result.error}`);
+    }
+  }
+
+  if (focusItems.length === 0) {
+    lines.push('');
+    lines.push('No new high-signal items in this cycle.');
+  } else {
+    lines.push('');
+    lines.push(`New high-signal items: ${pendingInteresting.length}`);
+    lines.push('');
+    for (const item of focusItems.slice(0, 6)) {
+      lines.push(`- ${item.headline}`);
+      lines.push(`  source: ${item.sourceName}${item.publisher ? ` via ${item.publisher}` : ''}`);
+      lines.push(`  published: ${formatTimestamp(item.publishedAt)}`);
+      if (item.reasons.length > 0) lines.push(`  why: ${item.reasons.join('; ')}`);
+      if (item.proposals.length > 0) lines.push(`  candidate moves: ${item.proposals.join(' | ')}`);
+      lines.push(`  link: ${item.link || '(missing link)'}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Top proposal themes:');
+  if (proposalSummary.length === 0) {
+    lines.push('- none');
+  } else {
+    for (const proposal of proposalSummary.slice(0, 5)) {
+      lines.push(`- ${proposal.proposal} (${proposal.count})`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Artifacts:');
+  lines.push(`- Markdown report: ${reportPaths.latestMarkdownPath}`);
+  lines.push(`- JSON summary: ${reportPaths.latestJsonPath}`);
+  lines.push('');
+  lines.push('Please review this digest and respond with:');
+  lines.push('1. Delta');
+  lines.push('2. Why it matters for RemoteLab');
+  lines.push('3. Proposal');
+  lines.push('4. Ignore / watch');
+
+  return `${lines.join('\n')}\n`;
+}
+
+async function waitForRunCompletion(baseUrl, runId, cookie) {
+  const startedMs = Date.now();
+  while (Date.now() - startedMs <= RUN_POLL_TIMEOUT_MS) {
+    const result = await requestJson(baseUrl, `/api/runs/${runId}`, { cookie });
+    if (!result.response.ok || !result.json?.run) {
+      throw new Error(result.json?.error || result.text || `Failed to load run ${runId}`);
+    }
+    const run = result.json.run;
+    if (['completed', 'failed', 'cancelled'].includes(run.state)) {
+      return run;
+    }
+    await sleep(RUN_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(`Timed out waiting for run ${runId}`);
+}
+
+async function submitDigestToRemoteLab(config, { runAt, firstRun, pendingInteresting, allInteresting, sourceResults, reportPaths, dryRun }) {
+  const remoteConfig = config?.remotelab || {};
+  const sessionConfig = remoteConfig?.session || {};
+  const appId = trimString(sessionConfig.appId);
+  if (!appId) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'no_app_configured',
+    };
+  }
+
+  if (dryRun) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'dry_run',
+      appId,
+    };
+  }
+
+  const baseUrl = normalizeBaseUrl(trimString(remoteConfig.baseUrl) || DEFAULT_REMOTELAB_BASE_URL);
+  const authFile = trimString(remoteConfig.authFile) || DEFAULT_REMOTELAB_AUTH_FILE;
+  const cookie = await authenticateOwner(baseUrl, authFile);
+  const app = await loadAutomationApp(baseUrl, appId, cookie);
+  if (!app) {
+    throw new Error(`App not found for remote capability monitor: ${appId}`);
+  }
+
+  const sessionPayload = {
+    folder: expandHome(trimString(sessionConfig.folder) || trimString(remoteConfig.sessionFolder) || DEFAULT_REMOTELAB_SESSION_FOLDER),
+    tool: trimString(sessionConfig.tool) || trimString(app.tool) || trimString(remoteConfig.tool) || 'codex',
+    name: trimString(sessionConfig.name) || trimString(app.name) || 'Agent Radar',
+    appId,
+    appName: trimString(app.name),
+    group: trimString(sessionConfig.group) || 'Automation',
+    description: trimString(sessionConfig.description) || 'Scheduled scout for remote-control coding-agent capabilities and competitor changes.',
+    systemPrompt: trimString(app.systemPrompt) || trimString(sessionConfig.systemPrompt),
+    externalTriggerId: trimString(sessionConfig.externalTriggerId) || `automation:${appId}:remote-capability-monitor`,
+  };
+
+  const createResult = await requestJson(baseUrl, '/api/sessions', {
+    method: 'POST',
+    cookie,
+    body: sessionPayload,
+  });
+  if (!createResult.response.ok || !createResult.json?.session?.id) {
+    throw new Error(createResult.json?.error || createResult.text || `Failed to create session (${createResult.response.status})`);
+  }
+
+  const session = createResult.json.session;
+  const requestSeed = pendingInteresting.map((item) => item.id).sort().join(',') || `heartbeat:${runAt}`;
+  const requestId = `remote-capability-monitor:${createHash('sha1').update(`${requestSeed}:${runAt}`).digest('hex').slice(0, 16)}`;
+  const messagePayload = {
+    requestId,
+    text: buildSessionDigestMessage({
+      runAt,
+      firstRun,
+      pendingInteresting,
+      allInteresting,
+      sourceResults,
+      reportPaths,
+    }),
+    tool: sessionPayload.tool,
+  };
+  if (typeof sessionConfig.thinking === 'boolean') messagePayload.thinking = sessionConfig.thinking;
+  if (trimString(sessionConfig.model)) messagePayload.model = trimString(sessionConfig.model);
+  if (trimString(sessionConfig.effort)) messagePayload.effort = trimString(sessionConfig.effort);
+
+  const submitResult = await requestJson(baseUrl, `/api/sessions/${session.id}/messages`, {
+    method: 'POST',
+    cookie,
+    body: messagePayload,
+  });
+  if (![200, 202].includes(submitResult.response.status) || !submitResult.json?.run?.id) {
+    throw new Error(submitResult.json?.error || submitResult.text || `Failed to submit digest message (${submitResult.response.status})`);
+  }
+
+  const run = await waitForRunCompletion(baseUrl, submitResult.json.run.id, cookie);
+
+  return {
+    success: run.state === 'completed',
+    appId,
+    appName: trimString(app.name),
+    sessionId: session.id,
+    runId: submitResult.json.run.id,
+    requestId,
+    runState: run.state,
+    duplicate: submitResult.json?.duplicate === true,
+    sessionUrl: buildSessionUrl(session.id),
+  };
+}
+
 function touchObservedItem(state, item, runAt) {
   const existing = state.observedItems[item.id] || {};
   state.observedItems[item.id] = {
@@ -790,29 +1035,44 @@ function pruneStateIndex(index, timestampKey, cutoffMs) {
   return pruned;
 }
 
-function buildNotificationMessage({ pendingInteresting, allInteresting, reportPaths, firstRun }) {
+function buildNotificationMessage({ pendingInteresting, allInteresting, reportPaths, firstRun, sessionResult }) {
   const proposalSummary = summarizeProposals(pendingInteresting.length > 0 ? pendingInteresting : allInteresting);
   const focusItems = pendingInteresting.length > 0 ? pendingInteresting : allInteresting.slice(0, 3);
+  const sessionUrl = trimString(sessionResult?.sessionUrl);
 
   if (pendingInteresting.length === 0) {
+    const noSignalTitle = sessionResult?.success
+      ? `${sessionResult.appName || 'Agent Radar'}: review refreshed`
+      : 'RemoteLab scout: no new signals';
+    const noSignalBody = sessionResult?.success
+      ? 'No new signals; the review session was refreshed.'
+      : 'No new high-signal remote-agent changes in this cycle.';
     return {
-      title: 'RemoteLab scout: no new signals',
-      body: 'No new high-signal remote-agent changes in this cycle.',
+      title: noSignalTitle,
+      body: noSignalBody,
       text: [
         `RemoteLab scout completed an ${firstRun ? 'initial bootstrap' : 'incremental'} cycle and found no new high-signal items.`,
         '',
+        ...(sessionResult?.success ? [
+          `Review session: ${sessionResult.appName || 'Agent Radar'} (${sessionResult.sessionId})`,
+          `Deep link: ${sessionResult.sessionUrl}`,
+          '',
+        ] : []),
         `Latest report: ${reportPaths.latestMarkdownPath}`,
       ].join('\n'),
       proposalSummary,
       focusItems,
+      url: sessionUrl || '/?tab=sessions',
     };
   }
 
-  const title = `RemoteLab scout: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'}`;
+  const title = sessionResult?.success
+    ? `Agent Radar: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'} ready`
+    : `RemoteLab scout: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'}`;
   const firstHeadline = truncate(focusItems[0]?.headline || 'New remote-agent signal', 72);
-  const body = pendingInteresting.length === 1
-    ? firstHeadline
-    : `${firstHeadline}; +${pendingInteresting.length - 1} more`;
+  const body = sessionResult?.success
+    ? `Review is ready in ${sessionResult.appName || 'the scout session'}`
+    : (pendingInteresting.length === 1 ? firstHeadline : `${firstHeadline}; +${pendingInteresting.length - 1} more`);
   const lines = [
     `RemoteLab scout found ${pendingInteresting.length} new high-signal item${pendingInteresting.length === 1 ? '' : 's'}.`,
     '',
@@ -829,6 +1089,11 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
     lines.push(`- ${item.headline}`);
   }
   lines.push('');
+  if (sessionResult?.success) {
+    lines.push(`Review session: ${sessionResult.appName || 'Agent Radar'} (${sessionResult.sessionId})`);
+    lines.push(`Deep link: ${sessionResult.sessionUrl}`);
+    lines.push('');
+  }
   lines.push(`Latest report: ${reportPaths.latestMarkdownPath}`);
 
   return {
@@ -837,6 +1102,7 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
     text: lines.join('\n'),
     proposalSummary,
     focusItems,
+    url: sessionUrl || '/?tab=sessions',
   };
 }
 
@@ -852,7 +1118,7 @@ function materializeNotificationChannels(channelTemplates, message) {
     } else if (type === 'remotelab_web_push') {
       next.title = trimString(channel?.title) || message.title;
       next.body = trimString(channel?.body) || message.body;
-      next.url = trimString(channel?.url) || '/?tab=sessions';
+      next.url = trimString(message?.url) || trimString(channel?.url) || '/?tab=sessions';
     } else if (type === 'mac_notification') {
       next.title = trimString(channel?.title) || message.title;
       next.body = trimString(channel?.body) || message.body;
@@ -1021,6 +1287,7 @@ export async function runMonitor(rawOptions) {
       latestMarkdownPath: join(reportDir, 'latest.md'),
       latestJsonPath: join(reportDir, 'latest.json'),
     },
+    sessionResult: null,
     notificationResult: null,
   });
   const markdown = renderReport({
@@ -1030,9 +1297,28 @@ export async function runMonitor(rawOptions) {
     allInteresting,
     pendingInteresting,
     latestSummaryPath: join(reportDir, 'latest.json'),
+    sessionResult: null,
   });
   const reportPaths = await writeReports(reportDir, markdown, provisionalSummary);
-  const message = buildNotificationMessage({ pendingInteresting, allInteresting, reportPaths, firstRun });
+  let sessionResult = {
+    success: false,
+    skipped: pendingInteresting.length === 0 && !options.forceNotify,
+    reason: pendingInteresting.length === 0 && !options.forceNotify ? 'no_new_signals' : '',
+  };
+
+  if (pendingInteresting.length > 0 || options.forceNotify) {
+    sessionResult = await submitDigestToRemoteLab(config, {
+      runAt,
+      firstRun,
+      pendingInteresting,
+      allInteresting,
+      sourceResults,
+      reportPaths,
+      dryRun: options.dryRun,
+    });
+  }
+
+  const message = buildNotificationMessage({ pendingInteresting, allInteresting, reportPaths, firstRun, sessionResult });
 
   let notificationResult = {
     success: false,
@@ -1040,7 +1326,15 @@ export async function runMonitor(rawOptions) {
     reason: pendingInteresting.length === 0 && !options.forceNotify ? 'no_new_signals' : '',
   };
 
-  if (pendingInteresting.length > 0 || options.forceNotify) {
+  const shouldSendNotification = options.forceNotify || (!sessionResult.success && pendingInteresting.length > 0);
+
+  if (sessionResult.success && pendingInteresting.length > 0 && !options.forceNotify) {
+    notificationResult = {
+      success: false,
+      skipped: true,
+      reason: 'session_delivery_primary',
+    };
+  } else if (shouldSendNotification) {
     notificationResult = await sendDigestNotification(
       config,
       message,
@@ -1050,6 +1344,18 @@ export async function runMonitor(rawOptions) {
     );
   }
 
+  const finalMarkdown = renderReport({
+    startedAt: runAt,
+    firstRun,
+    sourceResults,
+    allInteresting,
+    pendingInteresting,
+    latestSummaryPath: reportPaths.latestJsonPath,
+    sessionResult,
+  });
+  await writeText(reportPaths.markdownPath, finalMarkdown);
+  await writeText(reportPaths.latestMarkdownPath, finalMarkdown);
+
   const finalSummary = buildSummaryJson({
     startedAt: runAt,
     firstRun,
@@ -1057,6 +1363,7 @@ export async function runMonitor(rawOptions) {
     allInteresting,
     pendingInteresting,
     reportPaths,
+    sessionResult,
     notificationResult,
   });
   await writeJson(reportPaths.jsonPath, finalSummary);
@@ -1072,9 +1379,9 @@ export async function runMonitor(rawOptions) {
     state.lastRunAt = runAt;
     state.lastReportPath = reportPaths.latestMarkdownPath;
 
-    if (notificationResult.success && pendingInteresting.length > 0) {
+    if ((sessionResult.success || notificationResult.success) && pendingInteresting.length > 0) {
       markItemsNotified(state, pendingInteresting, {
-        notificationId: notificationResult.notificationId,
+        notificationId: sessionResult.runId || notificationResult.notificationId || 'session-delivered',
         reportPath: reportPaths.latestMarkdownPath,
       }, runAt);
     }
@@ -1088,7 +1395,7 @@ export async function runMonitor(rawOptions) {
   console.log(JSON.stringify(finalSummary, null, 2));
 
   const failedSources = sourceResults.filter((result) => result.error);
-  if (!options.dryRun && pendingInteresting.length > 0 && !notificationResult.success) {
+  if (!options.dryRun && pendingInteresting.length > 0 && !sessionResult.success && !notificationResult.success) {
     process.exitCode = 1;
   } else if (failedSources.length === sourceResults.length) {
     process.exitCode = 1;

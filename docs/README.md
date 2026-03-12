@@ -50,10 +50,11 @@ For setup, deployment, connector, and feature-rollout docs, assume the operator 
 
 ### Focused Integrations
 
+- `automation-apps.md` — automation-as-App pattern for owner-side recurring workflows and review sessions
 - `cloudflare-email-worker.md` — model-first Cloudflare Email Worker deployment contract
 - `feishu-bot-setup.md` — model-first operator + console contract for the RemoteLab Feishu connector
 - `github-auto-triage.md` — model-first GitHub intake and auto-reply rollout contract
-- `remote-capability-monitor.md` — model-first local rollout contract for remote-agent capability monitoring
+- `remote-capability-monitor.md` — remote-agent capability monitoring backed by a RemoteLab App and review session
 
 ## What Lives In `notes/`
 
