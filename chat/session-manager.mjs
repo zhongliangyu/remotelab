@@ -480,6 +480,22 @@ function createInternalRequestId(prefix = 'internal') {
   return `${prefix}_${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`;
 }
 
+function getInternalSessionRole(meta) {
+  return typeof meta?.internalRole === 'string' ? meta.internalRole.trim() : '';
+}
+
+function isInternalSession(meta) {
+  return !!getInternalSessionRole(meta);
+}
+
+function isContextCompactorSession(meta) {
+  return getInternalSessionRole(meta) === INTERNAL_SESSION_ROLE_CONTEXT_COMPACTOR;
+}
+
+function shouldExposeSession(meta) {
+  return !isInternalSession(meta);
+}
+
 function findSessionMetaCached(sessionId) {
   if (!Array.isArray(sessionsMetaCache)) return null;
   return sessionsMetaCache.find((meta) => meta.id === sessionId) || null;

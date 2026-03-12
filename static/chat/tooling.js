@@ -242,15 +242,6 @@ function resetHeaderActionButton(button) {
   }
 }
 
-function syncCaptureButton() {
-  if (!captureViewBtn) return;
-  const visible = !visitorMode && !!currentSessionId;
-  captureViewBtn.style.display = visible ? "" : "none";
-  if (!visible) {
-    resetHeaderActionButton(captureViewBtn);
-  }
-}
-
 function syncShareButton() {
   if (!shareSnapshotBtn) return;
   const visible = !visitorMode && !!currentSessionId;
@@ -270,38 +261,6 @@ function syncForkButton() {
   }
   const session = getCurrentSession();
   forkSessionBtn.disabled = !session || session.status === "running";
-}
-
-async function openCurrentSessionCaptureView() {
-  if (!currentSessionId || visitorMode || !captureViewBtn) return;
-
-  captureViewBtn.disabled = true;
-  const captureUrl = new URL(`/capture/${encodeURIComponent(currentSessionId)}`, location.origin).toString();
-
-  try {
-    const openedWindow = window.open(captureUrl, "_blank", "noopener");
-    if (openedWindow) {
-      try {
-        openedWindow.focus();
-      } catch {}
-      updateCopyButtonLabel(captureViewBtn, "Opened");
-      return;
-    }
-
-    await copyText(captureUrl);
-    updateCopyButtonLabel(captureViewBtn, "Copied");
-  } catch (err) {
-    console.warn("[capture] Failed to open capture view:", err.message);
-    try {
-      window.prompt("Open capture view", captureUrl);
-      updateCopyButtonLabel(captureViewBtn, "Ready");
-    } catch {
-      updateCopyButtonLabel(captureViewBtn, "Failed");
-    }
-  } finally {
-    captureViewBtn.disabled = false;
-    syncCaptureButton();
-  }
 }
 
 async function shareCurrentSessionSnapshot() {
@@ -718,10 +677,6 @@ copyProviderPromptBtn.addEventListener("click", async () => {
     console.warn("[copy] Failed to copy provider prompt:", err.message);
   }
 });
-
-if (captureViewBtn) {
-  captureViewBtn.addEventListener("click", openCurrentSessionCaptureView);
-}
 
 if (shareSnapshotBtn) {
   shareSnapshotBtn.addEventListener("click", shareCurrentSessionSnapshot);

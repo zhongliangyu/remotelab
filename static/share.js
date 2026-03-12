@@ -11,7 +11,6 @@
   const view = snapshot.view && typeof snapshot.view === "object"
     ? snapshot.view
     : {};
-  const viewMode = view.mode === "capture" ? "capture" : "share";
 
   let currentThinkingBlock = null;
   let inThinkingBlock = false;
@@ -445,13 +444,13 @@
     const tool = snapshot.session?.tool || "Unknown tool";
     const timestampLabel = typeof view.timestampLabel === "string" && view.timestampLabel
       ? view.timestampLabel
-      : (viewMode === "capture" ? "Captured" : "Shared");
+      : "Shared";
     const titleSuffix = typeof view.titleSuffix === "string" && view.titleSuffix
       ? view.titleSuffix
-      : (viewMode === "capture" ? "Capture View" : "Shared Snapshot");
+      : "Shared Snapshot";
     const badge = typeof view.badge === "string" && view.badge
       ? view.badge
-      : (viewMode === "capture" ? "Capture view" : "Read-only snapshot");
+      : "Read-only snapshot";
     const note = typeof view.note === "string" && view.note
       ? view.note
       : "This link exposes only this captured conversation snapshot. It cannot send messages, join a live session, or browse any other RemoteLab content.";

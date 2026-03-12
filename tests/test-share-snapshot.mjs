@@ -229,19 +229,13 @@ async function main() {
   assert.ok(!publicShareRes.body.includes('/api/auth/me'), 'share page should not bootstrap owner auth UI');
   assert.ok(!publicShareRes.body.includes('/ws'), 'share page should not connect to live websocket');
 
-  const unauthenticatedCaptureRes = await request('GET', `/capture/${session.id}`);
-  assert.strictEqual(unauthenticatedCaptureRes.status, 302, 'capture view should require auth');
+  const unauthenticatedRemovedRouteRes = await request('GET', `/capture/${session.id}`);
+  assert.strictEqual(unauthenticatedRemovedRouteRes.status, 302, 'unknown owner routes should still require auth');
 
-  const captureRes = await request('GET', `/capture/${session.id}`, {
+  const removedRouteRes = await request('GET', `/capture/${session.id}`, {
     headers: { Cookie: cookie },
   });
-  assert.strictEqual(captureRes.status, 200, 'capture view should load for the authenticated owner');
-  assert.match(captureRes.headers['content-security-policy'] || '', /connect-src 'none'/, 'capture view CSP should block network access');
-  assert.match(captureRes.headers['cache-control'] || '', /no-store/, 'capture view should not be cached');
-  assert.ok(captureRes.body.includes('Optimized for long screenshots'), 'capture view should include the long-screenshot guidance');
-  assert.ok(!captureRes.body.includes('msgInput'), 'capture view should not include live chat input');
-  assert.ok(!captureRes.body.includes('/api/auth/me'), 'capture view should not bootstrap owner auth UI');
-  assert.ok(!captureRes.body.includes('/ws'), 'capture view should not connect to live websocket');
+  assert.strictEqual(removedRouteRes.status, 404, 'capture route should be removed for authenticated owners');
 
   const missingRes = await request('GET', '/share/snap_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
   assert.strictEqual(missingRes.status, 404, 'missing share should return 404');

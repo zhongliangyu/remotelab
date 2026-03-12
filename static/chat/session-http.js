@@ -306,7 +306,6 @@ function applyAttachedSessionState(id, session) {
   renderSessionList();
   updateResumeButton();
   syncBrowserState();
-  syncCaptureButton();
   syncForkButton();
   syncShareButton();
 }
