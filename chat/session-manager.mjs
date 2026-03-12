@@ -1,8 +1,8 @@
 import { randomBytes } from 'crypto';
 import { watch } from 'fs';
 import { writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
-import { CHAT_SESSIONS_FILE, CHAT_IMAGES_DIR } from '../lib/config.mjs';
+import { join } from 'path';
+import { CHAT_IMAGES_DIR } from '../lib/config.mjs';
 import { createToolInvocation } from './process-runner.mjs';
 import {
   appendEvent,
@@ -49,15 +49,23 @@ import {
   updateRun,
 } from './runs.mjs';
 import { spawnDetachedRunner } from './runner-supervisor.mjs';
+import {
+  buildSessionActivity,
+  getSessionQueueCount,
+  getSessionRunId,
+  isSessionRunning,
+  resolveSessionRunActivity,
+} from './session-activity.mjs';
+import {
+  findSessionMeta,
+  findSessionMetaCached,
+  loadSessionsMeta,
+  mutateSessionMeta,
+  withSessionsMetaMutation,
+} from './session-meta-store.mjs';
 import { dispatchSessionEmailCompletionTargets, sanitizeEmailCompletionTargets } from '../lib/agent-mail-completion-targets.mjs';
 import { createApp, getApp, normalizeAppId, resolveEffectiveAppId } from './apps.mjs';
-import {
-  createSerialTaskQueue,
-  ensureDir,
-  readJson,
-  statOrNull,
-  writeJsonAtomic,
-} from './fs-utils.mjs';
+import { ensureDir } from './fs-utils.mjs';
 
 const MIME_EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
 const VISITOR_TURN_GUARDRAIL = [
@@ -141,9 +149,6 @@ function getAutoCompactStatusText(run) {
 
 const liveSessions = new Map();
 const observedRuns = new Map();
-let sessionsMetaCache = null;
-let sessionsMetaCacheMtimeMs = null;
-const runSessionsMetaMutation = createSerialTaskQueue();
 
 function nowIso() {
   return new Date().toISOString();
@@ -476,11 +481,6 @@ function shouldExposeSession(meta) {
   return !isInternalSession(meta);
 }
 
-function findSessionMetaCached(sessionId) {
-  if (!Array.isArray(sessionsMetaCache)) return null;
-  return sessionsMetaCache.find((meta) => meta.id === sessionId) || null;
-}
-
 function ensureLiveSession(sessionId) {
   let live = liveSessions.get(sessionId);
   if (!live) {
@@ -575,100 +575,6 @@ async function saveImages(images) {
   }));
 }
 
-function normalizeStoredSessionMeta(meta) {
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
-    return { meta: null, changed: true };
-  }
-
-  const normalized = { ...meta };
-  let changed = false;
-
-  for (const legacyField of ['activeRun', 'status', 'queuedMessageCount', 'pendingCompact', 'renameState', 'renameError', 'recoverable']) {
-    if (Object.prototype.hasOwnProperty.call(normalized, legacyField)) {
-      delete normalized[legacyField];
-      changed = true;
-    }
-  }
-
-  return { meta: normalized, changed };
-}
-
-function normalizeStoredSessionsMeta(list) {
-  let changed = false;
-  const normalized = [];
-  for (const entry of Array.isArray(list) ? list : []) {
-    const result = normalizeStoredSessionMeta(entry);
-    if (!result.meta) {
-      changed = true;
-      continue;
-    }
-    normalized.push(result.meta);
-    changed = changed || result.changed;
-  }
-  return { list: normalized, changed };
-}
-
-async function loadSessionsMeta() {
-  const stats = await statOrNull(CHAT_SESSIONS_FILE);
-  if (!stats) {
-    sessionsMetaCache = [];
-    sessionsMetaCacheMtimeMs = null;
-    return sessionsMetaCache;
-  }
-
-  const mtimeMs = stats.mtimeMs;
-
-  if (sessionsMetaCache && sessionsMetaCacheMtimeMs === mtimeMs) {
-    return sessionsMetaCache;
-  }
-  const parsed = await readJson(CHAT_SESSIONS_FILE, []);
-  const normalized = normalizeStoredSessionsMeta(parsed);
-  sessionsMetaCache = normalized.list;
-  if (normalized.changed) {
-    await saveSessionsMetaUnlocked(sessionsMetaCache);
-  } else {
-    sessionsMetaCacheMtimeMs = mtimeMs;
-  }
-  return sessionsMetaCache;
-}
-
-async function saveSessionsMetaUnlocked(list) {
-  const dir = dirname(CHAT_SESSIONS_FILE);
-  await ensureDir(dir);
-  await writeJsonAtomic(CHAT_SESSIONS_FILE, list);
-  sessionsMetaCache = list;
-  sessionsMetaCacheMtimeMs = (await statOrNull(CHAT_SESSIONS_FILE))?.mtimeMs ?? null;
-}
-
-async function findSessionMeta(sessionId) {
-  const metas = await loadSessionsMeta();
-  return metas.find((meta) => meta.id === sessionId) || null;
-}
-
-async function findSessionByExternalTriggerId(externalTriggerId) {
-  const normalized = typeof externalTriggerId === 'string' ? externalTriggerId.trim() : '';
-  if (!normalized) return null;
-  const metas = await loadSessionsMeta();
-  return metas.find((meta) => meta.externalTriggerId === normalized && !meta.archived) || null;
-}
-
-async function mutateSessionMeta(sessionId, mutator) {
-  return runSessionsMetaMutation(async () => {
-    const metas = await loadSessionsMeta();
-    const index = metas.findIndex((meta) => meta.id === sessionId);
-    if (index === -1) return { meta: null, changed: false };
-    const current = metas[index];
-    const draft = { ...current };
-    const changed = mutator(draft, current) === true;
-    if (!changed) {
-      return { meta: current, changed: false };
-    }
-    metas[index] = draft;
-    await saveSessionsMetaUnlocked(metas);
-    return { meta: draft, changed: true };
-  });
-}
-
 async function touchSessionMeta(sessionId, extra = {}) {
   return (await mutateSessionMeta(sessionId, (session) => {
     session.updatedAt = nowIso();
@@ -746,72 +652,6 @@ function getSessionSortTime(meta) {
 
 function getSessionPinSortRank(meta) {
   return meta?.pinned === true ? 1 : 0;
-}
-
-async function resolveSessionRunActivity(meta) {
-  if (meta?.activeRunId) {
-    const run = await getRun(meta.activeRunId);
-    if (run && !isTerminalRunState(run.state)) {
-      return {
-        state: 'running',
-        run,
-      };
-    }
-  }
-
-  return {
-    state: 'idle',
-    run: null,
-  };
-}
-
-function getSessionRunState(session) {
-  return session?.activity?.run?.state === 'running' ? 'running' : 'idle';
-}
-
-function isSessionRunning(session) {
-  return getSessionRunState(session) === 'running';
-}
-
-function getSessionQueueCount(session) {
-  return Number.isInteger(session?.activity?.queue?.count) ? session.activity.queue.count : 0;
-}
-
-function getSessionRunId(session) {
-  return typeof session?.activity?.run?.runId === 'string' && session.activity.run.runId
-    ? session.activity.run.runId
-    : null;
-}
-
-function buildSessionActivity(meta, live, { runState, run, queuedCount }) {
-  const renameState = live?.renameState === 'pending' || live?.renameState === 'failed'
-    ? live.renameState
-    : 'idle';
-  const renameError = typeof live?.renameError === 'string' ? live.renameError : '';
-  const compactState = live?.pendingCompact === true ? 'pending' : 'idle';
-  const queueCount = Number.isInteger(queuedCount) ? queuedCount : 0;
-
-  return {
-    run: {
-      state: runState,
-      phase: typeof run?.state === 'string' ? run.state : null,
-      runId: runState === 'running' && typeof run?.id === 'string'
-        ? run.id
-        : (runState === 'running' && typeof meta?.activeRunId === 'string' ? meta.activeRunId : null),
-      cancelRequested: run?.cancelRequested === true,
-    },
-    queue: {
-      state: queueCount > 0 ? 'queued' : 'idle',
-      count: queueCount,
-    },
-    rename: {
-      state: renameState,
-      error: renameError || null,
-    },
-    compact: {
-      state: compactState,
-    },
-  };
 }
 
 async function enrichSessionMeta(meta) {
@@ -2014,8 +1854,7 @@ export async function createSession(folder, tool, name, extra = {}) {
   const externalTriggerId = typeof extra.externalTriggerId === 'string' ? extra.externalTriggerId.trim() : '';
   const requestedAppId = normalizeAppId(extra.appId);
   const requestedAppName = normalizeSessionAppName(extra.appName);
-  const created = await runSessionsMetaMutation(async () => {
-    const metas = await loadSessionsMeta();
+  const created = await withSessionsMetaMutation(async (metas, saveSessionsMeta) => {
     if (externalTriggerId) {
       const existingIndex = metas.findIndex((meta) => meta.externalTriggerId === externalTriggerId && !meta.archived);
       if (existingIndex !== -1) {
@@ -2061,7 +1900,7 @@ export async function createSession(folder, tool, name, extra = {}) {
         if (changed) {
           updated.updatedAt = nowIso();
           metas[existingIndex] = updated;
-          await saveSessionsMetaUnlocked(metas);
+          await saveSessionsMeta(metas);
           return { session: updated, created: false, changed: true };
         }
 
@@ -2102,7 +1941,7 @@ export async function createSession(folder, tool, name, extra = {}) {
     if (completionTargets.length > 0) session.completionTargets = completionTargets;
 
     metas.push(session);
-    await saveSessionsMetaUnlocked(metas);
+    await saveSessionsMeta(metas);
     return { session, created: true, changed: true };
   });
 
