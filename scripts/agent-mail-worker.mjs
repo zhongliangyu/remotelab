@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { pathToFileURL } from 'url';
 
 import { AUTH_FILE } from '../lib/config.mjs';
 import {
@@ -111,6 +113,43 @@ async function requestJson(baseUrl, path, { method = 'GET', cookie, body } = {})
   } catch {}
 
   return { response, json, text };
+}
+
+function createRemoteLabRuntime(baseUrl) {
+  return {
+    baseUrl: normalizeBaseUrl(baseUrl),
+    authToken: '',
+    authCookie: '',
+  };
+}
+
+async function ensureAuthCookie(runtime, forceRefresh = false) {
+  if (!forceRefresh && runtime.authCookie) {
+    return runtime.authCookie;
+  }
+  if (forceRefresh) {
+    runtime.authCookie = '';
+    runtime.authToken = '';
+  }
+  if (!runtime.authToken) {
+    runtime.authToken = typeof runtime.readOwnerToken === 'function'
+      ? await runtime.readOwnerToken()
+      : readOwnerToken();
+  }
+  const login = typeof runtime.loginWithToken === 'function' ? runtime.loginWithToken : loginWithToken;
+  runtime.authCookie = await login(runtime.baseUrl, runtime.authToken);
+  return runtime.authCookie;
+}
+
+async function requestRemoteLab(runtime, path, options = {}) {
+  const request = typeof runtime.requestJson === 'function' ? runtime.requestJson : requestJson;
+  const cookie = await ensureAuthCookie(runtime, false);
+  let result = await request(runtime.baseUrl, path, { ...options, cookie });
+  if ([401, 403].includes(result.response?.status)) {
+    const refreshedCookie = await ensureAuthCookie(runtime, true);
+    result = await request(runtime.baseUrl, path, { ...options, cookie: refreshedCookie });
+  }
+  return result;
 }
 
 function buildReplySubject(subject) {
@@ -250,7 +289,7 @@ function shouldProcessItem(item) {
   return true;
 }
 
-async function submitApprovedItem(item, rootDir, automation, baseUrl, cookie) {
+async function submitApprovedItem(item, rootDir, automation, runtime) {
   const requestId = trimString(item?.automation?.requestId) || `mailbox_reply_${item.id}`;
   const externalTriggerId = trimString(item?.message?.externalTriggerId)
     || buildEmailThreadExternalTriggerId({
@@ -275,9 +314,8 @@ async function submitApprovedItem(item, rootDir, automation, baseUrl, cookie) {
     externalTriggerId,
   };
 
-  const createResult = await requestJson(baseUrl, '/api/sessions', {
+  const createResult = await requestRemoteLab(runtime, '/api/sessions', {
     method: 'POST',
-    cookie,
     body: sessionPayload,
   });
   if (!createResult.response.ok || !createResult.json?.session?.id) {
@@ -300,9 +338,8 @@ async function submitApprovedItem(item, rootDir, automation, baseUrl, cookie) {
     messagePayload.effort = runtimeSelection.effort;
   }
 
-  const submitResult = await requestJson(baseUrl, `/api/sessions/${session.id}/messages`, {
+  const submitResult = await requestRemoteLab(runtime, `/api/sessions/${session.id}/messages`, {
     method: 'POST',
-    cookie,
     body: messagePayload,
   });
   if (![200, 202].includes(submitResult.response.status) || !submitResult.json?.run?.id) {
@@ -335,7 +372,7 @@ async function submitApprovedItem(item, rootDir, automation, baseUrl, cookie) {
   };
 }
 
-async function runSweep({ rootDir, baseUrl }) {
+async function runSweep({ rootDir, baseUrl, runtime = createRemoteLabRuntime(baseUrl) }) {
   const automation = loadMailboxAutomation(rootDir);
   if (automation.enabled === false) {
     return {
@@ -346,15 +383,13 @@ async function runSweep({ rootDir, baseUrl }) {
     };
   }
 
-  const token = readOwnerToken();
-  const cookie = await loginWithToken(baseUrl, token);
   const approvedItems = listQueue(APPROVED_QUEUE, rootDir).filter(shouldProcessItem);
   const successes = [];
   const failures = [];
 
   for (const item of approvedItems) {
     try {
-      successes.push(await submitApprovedItem(item, rootDir, automation, baseUrl, cookie));
+      successes.push(await submitApprovedItem(item, rootDir, automation, runtime));
     } catch (error) {
       updateQueueItem(item.id, rootDir, (draft) => {
         draft.status = 'reply_failed';
@@ -379,6 +414,11 @@ async function runSweep({ rootDir, baseUrl }) {
   };
 }
 
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  return import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+}
+
 async function main() {
   const { positional, options } = parseArgs(process.argv.slice(2));
   if (positional[0] === 'help' || options.help || options.h) {
@@ -391,9 +431,10 @@ async function main() {
   const baseUrl = optionValue(options, 'chat-base-url', automation.chatBaseUrl);
   const intervalMs = Math.max(1000, parseInt(optionValue(options, 'interval-ms', '5000'), 10) || 5000);
   const once = optionValue(options, 'once', false) === true;
+  const runtime = createRemoteLabRuntime(baseUrl);
 
   if (once) {
-    console.log(JSON.stringify(await runSweep({ rootDir, baseUrl }), null, 2));
+    console.log(JSON.stringify(await runSweep({ rootDir, baseUrl, runtime }), null, 2));
     return;
   }
 
@@ -402,7 +443,7 @@ async function main() {
     if (running) return;
     running = true;
     try {
-      const summary = await runSweep({ rootDir, baseUrl });
+      const summary = await runSweep({ rootDir, baseUrl, runtime });
       if (summary.processed > 0 || summary.failures.length > 0) {
         console.log(JSON.stringify(summary, null, 2));
       }
@@ -417,7 +458,16 @@ async function main() {
   setInterval(loop, intervalMs);
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+export {
+  createRemoteLabRuntime,
+  ensureAuthCookie,
+  requestRemoteLab,
+  runSweep,
+};
+
+if (isMainModule()) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}

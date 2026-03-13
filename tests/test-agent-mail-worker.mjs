@@ -26,6 +26,50 @@ const {
   saveMailboxAutomation,
 } = await import(pathToFileURL(join(repoRoot, 'lib', 'agent-mailbox.mjs')).href);
 const { saveUiRuntimeSelection } = await import(pathToFileURL(join(repoRoot, 'lib', 'runtime-selection.mjs')).href);
+const {
+  createRemoteLabRuntime,
+  ensureAuthCookie,
+  requestRemoteLab,
+} = await import(pathToFileURL(join(repoRoot, 'scripts', 'agent-mail-worker.mjs')).href);
+
+const authRefreshRuntime = createRemoteLabRuntime('http://127.0.0.1:7690');
+authRefreshRuntime.authCookie = 'session_token=stale-cookie';
+authRefreshRuntime.authToken = 'stale-token';
+authRefreshRuntime.readOwnerToken = async () => 'fresh-token';
+authRefreshRuntime.loginWithToken = async (_baseUrl, token) => `session_token=${token}`;
+
+assert.equal(
+  await ensureAuthCookie(authRefreshRuntime, false),
+  'session_token=stale-cookie',
+  'mail worker should reuse a cached cookie when no refresh is needed',
+);
+assert.equal(
+  await ensureAuthCookie(authRefreshRuntime, true),
+  'session_token=fresh-token',
+  'mail worker should reread the current owner token on forced auth refresh',
+);
+
+const retryProbeRuntime = createRemoteLabRuntime('http://127.0.0.1:7690');
+retryProbeRuntime.authCookie = 'session_token=stale-cookie';
+retryProbeRuntime.authToken = 'stale-token';
+retryProbeRuntime.readOwnerToken = async () => 'fresh-token';
+retryProbeRuntime.loginWithToken = async (_baseUrl, token) => `session_token=${token === 'fresh-token' ? 'fresh-cookie' : token}`;
+const retryProbeCookies = [];
+retryProbeRuntime.requestJson = async (_baseUrl, _path, options = {}) => {
+  retryProbeCookies.push(options.cookie || '');
+  if (options.cookie === 'session_token=stale-cookie') {
+    return { response: { status: 401, ok: false }, json: { error: 'unauthorized' }, text: 'unauthorized' };
+  }
+  return { response: { status: 200, ok: true }, json: { ok: true }, text: '{"ok":true}' };
+};
+
+const retryProbeResult = await requestRemoteLab(retryProbeRuntime, '/api/probe');
+assert.equal(retryProbeResult.response.status, 200, 'mail worker should retry after an auth failure');
+assert.deepEqual(
+  retryProbeCookies,
+  ['session_token=stale-cookie', 'session_token=fresh-cookie'],
+  'mail worker should retry with a refreshed cookie after a 401/403 response',
+);
 
 const requests = [];
 const sessionCreates = [];
