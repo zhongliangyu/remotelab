@@ -7,6 +7,7 @@ Use it when integrating things like:
 - email intake / reply workers
 - GitHub issue or PR bridges
 - chat bots / IM relays
+- wake-word voice speaker/microphone bridges
 - custom local automation that wants to open a session and hand work to the active agent
 
 The key product stance is simple:
