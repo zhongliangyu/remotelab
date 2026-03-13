@@ -152,6 +152,7 @@ async function main() {
     assert.match(page.text, /\.app-container\s*\{[\s\S]*?min-height:\s*0;/);
     assert.match(page.text, /\.chat-area\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0, 1fr\) auto auto;[\s\S]*?min-height:\s*0;/, 'chat area should model content, queued panel, and composer as explicit rows');
     assert.match(page.text, /\.messages\s*\{[\s\S]*?min-height:\s*0;/);
+    assert.match(page.text, /\.input-resize-handle\s*\{[\s\S]*?margin:\s*0 calc\(var\(--chat-gutter\) \* -1\) 8px;/, 'resize handle should mirror the current chat gutter so it does not create horizontal overflow on mobile');
     assert.match(page.text, /body\.keyboard-open \.messages/);
     assert.match(page.text, /body\.keyboard-open \.input-area/);
     assert.doesNotMatch(page.text, /--app-top-offset/);
