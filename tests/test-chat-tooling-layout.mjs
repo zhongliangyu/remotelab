@@ -56,7 +56,6 @@ function createContext({
   isDesktop = false,
   innerHeight = 812,
   visualHeight = 812,
-  visualOffsetTop = 0,
 } = {}) {
   const documentElementStyle = new Map();
   const documentElement = {
@@ -73,12 +72,33 @@ function createContext({
   };
   const resizeListeners = [];
   const viewportResizeListeners = [];
-  const viewportScrollListeners = [];
+  const animationFrames = [];
   const mq = createMatchMedia(isDesktop);
   const focusCalls = [];
   const msgInput = {
     focus(options) {
       focusCalls.push(options ?? null);
+    },
+  };
+  const windowTarget = {
+    innerHeight,
+    addEventListener(type, listener) {
+      if (type === 'resize') resizeListeners.push(listener);
+    },
+    requestAnimationFrame(callback) {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    },
+    matchMedia() {
+      return mq;
+    },
+    visualViewport: {
+      get height() {
+        return visualHeight;
+      },
+      addEventListener(type, listener) {
+        if (type === 'resize') viewportResizeListeners.push(listener);
+      },
     },
   };
   const context = {
@@ -93,46 +113,27 @@ function createContext({
       documentElement,
       body,
     },
-    window: {
-      innerHeight,
-      addEventListener(type, listener) {
-        if (type === 'resize') resizeListeners.push(listener);
-      },
-      matchMedia() {
-        return mq;
-      },
-      visualViewport: {
-        get height() {
-          return visualHeight;
-        },
-        get offsetTop() {
-          return visualOffsetTop;
-        },
-        addEventListener(type, listener) {
-          if (type === 'resize') viewportResizeListeners.push(listener);
-          if (type === 'scroll') viewportScrollListeners.push(listener);
-        },
-      },
-    },
+    window: windowTarget,
   };
   context.globalThis = context;
   return {
     context,
     documentElementStyle,
     body,
-    documentElement,
     mq,
     resizeListeners,
     viewportResizeListeners,
-    viewportScrollListeners,
     focusCalls,
-    setViewport(nextHeight, nextOffsetTop = visualOffsetTop) {
+    flushAnimationFrames() {
+      const callbacks = animationFrames.splice(0, animationFrames.length);
+      callbacks.forEach((callback) => callback());
+    },
+    setViewport(nextHeight) {
       visualHeight = nextHeight;
-      visualOffsetTop = nextOffsetTop;
     },
     setInnerHeight(nextHeight) {
       innerHeight = nextHeight;
-      context.window.innerHeight = nextHeight;
+      windowTarget.innerHeight = nextHeight;
       documentElement.clientHeight = nextHeight;
     },
   };
@@ -142,46 +143,57 @@ const mobileHarness = createContext({
   isDesktop: false,
   innerHeight: 812,
   visualHeight: 812,
-  visualOffsetTop: 0,
 });
 vm.runInNewContext(responsiveSource, mobileHarness.context, { filename: 'static/chat/tooling.js' });
 
+assert.ok(mobileHarness.context.window.RemoteLabLayout, 'tooling should expose a single shared layout controller');
+
 mobileHarness.context.syncViewportHeight();
-assert.equal(mobileHarness.documentElementStyle.get('--app-height'), '812px', 'app shell should track the visual viewport height');
-assert.equal(mobileHarness.documentElementStyle.get('--app-top-offset'), '0px', 'app shell should default to a zero viewport offset');
+assert.equal(mobileHarness.documentElementStyle.get('--app-height'), '812px', 'app shell should track the active viewport height');
 assert.equal(mobileHarness.documentElementStyle.get('--keyboard-inset-height'), '0px', 'keyboard inset should default to zero when the viewport is fully open');
 assert.equal(mobileHarness.body.classList.contains('keyboard-open'), false, 'keyboard-open should stay off when no keyboard inset exists');
 
-mobileHarness.setViewport(498, 0);
+mobileHarness.setViewport(498);
 mobileHarness.context.syncViewportHeight();
 assert.equal(mobileHarness.documentElementStyle.get('--app-height'), '498px', 'app shell should shrink with the keyboard-aware visual viewport');
 assert.equal(mobileHarness.documentElementStyle.get('--keyboard-inset-height'), '314px', 'keyboard inset should be derived from layout minus visual viewport height');
 assert.equal(mobileHarness.body.classList.contains('keyboard-open'), true, 'mobile shells should enter keyboard-open mode when the keyboard consumes meaningful space');
 
-mobileHarness.setViewport(700, 32);
+mobileHarness.setInnerHeight(700);
+mobileHarness.setViewport(700);
 mobileHarness.context.syncViewportHeight();
-assert.equal(mobileHarness.documentElementStyle.get('--app-top-offset'), '32px', 'app shell should track visual viewport top offset changes');
-assert.equal(mobileHarness.documentElementStyle.get('--keyboard-inset-height'), '80px', 'keyboard inset should subtract viewport top offset from the occupied area');
-assert.equal(mobileHarness.body.classList.contains('keyboard-open'), false, 'small viewport shifts should not be treated as a keyboard-open state');
+assert.equal(mobileHarness.documentElementStyle.get('--keyboard-inset-height'), '0px', 'keyboard inset should clear once the layout and visual viewports realign');
+assert.equal(mobileHarness.body.classList.contains('keyboard-open'), false, 'keyboard-open should clear once the viewport is fully restored');
+
+const layoutNotifications = [];
+mobileHarness.context.window.RemoteLabLayout.subscribe((state, reason) => {
+  layoutNotifications.push({ state, reason });
+});
+mobileHarness.setViewport(520);
+mobileHarness.context.requestLayoutPass('viewport-a');
+mobileHarness.context.requestLayoutPass('viewport-b');
+assert.equal(layoutNotifications.length, 0, 'layout pass requests should batch until the next animation frame');
+mobileHarness.flushAnimationFrames();
+assert.equal(layoutNotifications.length, 1, 'multiple layout requests in one frame should collapse into a single pass');
+assert.equal(layoutNotifications[0].reason, 'viewport-b', 'the latest queued reason should win for a batched layout pass');
+assert.equal(layoutNotifications[0].state.viewportHeight, 520, 'subscribers should receive the resolved viewport height from the unified pass');
 
 assert.equal(mobileHarness.context.focusComposer(), false, 'mobile session attachment should no longer auto-focus the composer by default');
 assert.deepEqual(mobileHarness.focusCalls, [], 'mobile default focus policy should not trigger the keyboard implicitly');
-assert.equal(mobileHarness.context.focusComposer({ force: true, preventScroll: true }), true, 'forced focus should still be available when the app needs user recovery input');
+assert.equal(mobileHarness.context.focusComposer({ force: true, preventScroll: true }), true, 'forced focus should still be available when the app needs recovery input');
 assert.equal(mobileHarness.focusCalls.length, 1, 'forced focus should invoke the composer exactly once');
-assert.equal(mobileHarness.focusCalls[0]?.preventScroll, true, 'forced focus should request preventScroll for a steadier mobile viewport');
+assert.equal(mobileHarness.focusCalls[0]?.preventScroll, true, 'forced focus should request preventScroll for steadier mobile viewport behavior');
 
 const desktopHarness = createContext({
   isDesktop: true,
   innerHeight: 900,
   visualHeight: 900,
-  visualOffsetTop: 0,
 });
 vm.runInNewContext(responsiveSource, desktopHarness.context, { filename: 'static/chat/tooling.js' });
 desktopHarness.context.initResponsiveLayout();
 
-assert.equal(desktopHarness.resizeListeners.length, 1, 'layout init should watch window resize');
-assert.equal(desktopHarness.viewportResizeListeners.length, 1, 'layout init should watch visual viewport resize');
-assert.equal(desktopHarness.viewportScrollListeners.length, 1, 'layout init should watch visual viewport scroll for mobile browser UI changes');
+assert.equal(desktopHarness.resizeListeners.length, 1, 'layout init should watch window resize in one place');
+assert.equal(desktopHarness.viewportResizeListeners.length, 1, 'layout init should watch visual viewport resize in one place');
 assert.equal(desktopHarness.context.focusComposer({ preventScroll: true }), true, 'desktop session attachment should still auto-focus the composer');
 assert.equal(desktopHarness.focusCalls.length, 1, 'desktop focus should invoke the composer exactly once');
 assert.equal(desktopHarness.focusCalls[0]?.preventScroll, true, 'desktop focus should pass through preventScroll when requested');

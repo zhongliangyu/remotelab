@@ -49,7 +49,6 @@
   --modal-shadow: 0 24px 60px rgba(0,0,0,0.24);
   --focus-border: #9f9f9f;
   --app-height: 100dvh;
-  --app-top-offset: 0px;
   --keyboard-inset-height: 0px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
@@ -116,13 +115,21 @@ body {
   font-family: -apple-system, system-ui, 'Segoe UI', sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
-  min-height: 100dvh;
-  height: var(--app-height, 100dvh);
+  min-height: 100%;
+  height: 100%;
   overflow: hidden;
   overscroll-behavior-y: none;
-  display: flex;
-  flex-direction: column;
+}
+
+.app-shell {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: var(--app-height, 100dvh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg);
 }
 
 /* ---- Header ---- */
@@ -200,8 +207,8 @@ body {
 .app-container {
   display: flex;
   flex-direction: row;
-  flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -426,8 +433,8 @@ body {
 /* ---- Chat area ---- */
 .chat-area {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   overflow: hidden;
   min-height: 0;
   min-width: 0;
@@ -1195,6 +1202,10 @@ body {
 
 /* ---- Desktop (>= 768px) ---- */
 @media (min-width: 768px) {
+  :root {
+    --chat-column-width: 70%;
+  }
+
   .header #menuBtn { display: none; }
 
   .sidebar-overlay {
@@ -1224,31 +1235,20 @@ body {
 
   /* Desktop: strip side padding from containers; 70% width on inner elements */
   .messages { padding: 28px 0; }
-  .messages-inner { width: 70%; margin: 0 auto; }
+  .messages-inner,
+  .queued-panel,
+  .input-wrapper {
+    width: var(--chat-column-width);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .queued-panel { margin-bottom: 10px; }
   .input-area { padding: 0 0 14px; padding-bottom: calc(14px + var(--safe-bottom)); }
-  .input-wrapper { width: 70%; margin: 0 auto; }
   .input-resize-handle { margin: 0 0 10px; }
   .modal-backdrop { padding-left: calc(var(--sidebar-collapsed-width) + 24px); }
 }
 
 @media (max-width: 767px) {
-  body {
-    position: fixed;
-    top: var(--app-top-offset);
-    left: 0;
-    right: 0;
-    width: 100%;
-    transition: top 0.18s ease, height 0.18s ease;
-  }
-
-  .messages,
-  .input-area,
-  .input-config-row,
-  .input-row,
-  .input-resize-handle {
-    transition: padding 0.18s ease, margin 0.18s ease, height 0.18s ease;
-  }
-
   body.keyboard-open .messages {
     padding-top: 12px;
     padding-bottom: 12px;
@@ -1293,6 +1293,7 @@ body.visitor-mode .gesture-pill { display: none !important; }
 </style>
 </head>
 <body>
+<div class="app-shell">
 
 <!-- Header -->
 <div class="header">
@@ -1376,6 +1377,7 @@ body.visitor-mode .gesture-pill { display: none !important; }
       </div>
     </div>
   </main>
+</div>
 </div>
 
 <div class="gesture-pill" id="gesturePill" aria-hidden="true"></div>

@@ -117,21 +117,45 @@ function createContext({
       };
     },
   };
+  const windowResizeListeners = [];
+  const visualViewportResizeListeners = [];
+  const layoutSubscribers = [];
   const windowTarget = {
     innerHeight: windowInnerHeight,
-    addEventListener() {},
+    addEventListener(type, listener) {
+      if (type === 'resize') windowResizeListeners.push(listener);
+    },
     visualViewport: {
       height: visualViewportHeight,
-      addEventListener() {},
+      addEventListener(type, listener) {
+        if (type === 'resize') visualViewportResizeListeners.push(listener);
+      },
     },
   };
   const focusComposerCalls = [];
+  const remoteLabLayout = {
+    getViewportHeight() {
+      const managedHeight = windowTarget.visualViewport?.height;
+      if (Number.isFinite(managedHeight) && managedHeight > 0) {
+        return managedHeight;
+      }
+      return windowTarget.innerHeight || 0;
+    },
+    subscribe(listener) {
+      layoutSubscribers.push(listener);
+      return () => {};
+    },
+  };
+  windowTarget.RemoteLabLayout = remoteLabLayout;
   const context = {
     console,
     msgInput,
     inputArea,
     inputResizeHandle: makeEventTarget(),
     focusComposerCalls,
+    layoutSubscribers,
+    windowResizeListeners,
+    visualViewportResizeListeners,
     currentSessionId: 'session-a',
     localStorage,
     window: windowTarget,
@@ -205,6 +229,9 @@ const context = createContext();
 vm.runInNewContext(composeSource, context, { filename: 'static/chat/compose.js' });
 
 assert.equal(context.msgInput.style.height, '72px', 'composer should default to a 3-line height');
+assert.equal(context.layoutSubscribers.length, 1, 'composer should subscribe to the shared layout controller');
+assert.equal(context.windowResizeListeners.length, 0, 'composer should not attach its own window resize listener when the shared layout controller exists');
+assert.equal(context.visualViewportResizeListeners.length, 0, 'composer should not attach its own visual viewport resize listener when the shared layout controller exists');
 
 context.msgInput.value = 'draft for A';
 context.saveDraft();

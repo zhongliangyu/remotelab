@@ -21,8 +21,14 @@ async function pathExists(path) {
 await mkdir(authDir, { recursive: true });
 
 const token = randomBytes(32).toString('hex');
+let existing = {};
+if (await pathExists(authFile)) {
+  try {
+    existing = JSON.parse(await readFile(authFile, 'utf8')) || {};
+  } catch {}
+}
 
-await writeFile(authFile, JSON.stringify({ token }, null, 2), 'utf8');
+await writeFile(authFile, JSON.stringify({ ...existing, token }, null, 2), 'utf8');
 
 // Try to read real domain from cloudflared config
 let domain = null;

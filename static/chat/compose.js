@@ -96,6 +96,10 @@ function getInputChromeH() {
 }
 
 function getViewportHeight() {
+  const managedViewportHeight = window.RemoteLabLayout?.getViewportHeight?.();
+  if (Number.isFinite(managedViewportHeight) && managedViewportHeight > 0) {
+    return managedViewportHeight;
+  }
   const visualHeight = window.visualViewport?.height;
   if (Number.isFinite(visualHeight) && visualHeight > 0) {
     return visualHeight;
@@ -223,8 +227,14 @@ if (inputResizeHandle) {
   inputResizeHandle.addEventListener("touchstart", onInputResizeStart, { passive: false });
 }
 
-window.addEventListener("resize", syncInputHeightForLayout);
-window.visualViewport?.addEventListener("resize", syncInputHeightForLayout);
+if (window.RemoteLabLayout?.subscribe) {
+  window.RemoteLabLayout.subscribe(() => {
+    syncInputHeightForLayout();
+  });
+} else {
+  window.addEventListener("resize", syncInputHeightForLayout);
+  window.visualViewport?.addEventListener("resize", syncInputHeightForLayout);
+}
 
 // ---- Draft persistence ----
 function saveDraft() {

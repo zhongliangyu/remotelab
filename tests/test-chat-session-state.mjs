@@ -87,6 +87,12 @@ const normalizeSessionRecordSnippet = sliceBetween(
   'function upsertSession',
 );
 
+const applyAttachedSessionStateSnippet = sliceBetween(
+  sessionHttpSource,
+  'function applyAttachedSessionState',
+  'async function fetchSessionState',
+);
+
 const dispatchActionSnippet = sliceBetween(
   realtimeSource,
   'async function dispatchAction',
@@ -230,5 +236,76 @@ assert.equal(scheduledRefreshes, 1, 'accepted sends should schedule exactly one 
 assert.equal(savedPendingCalls, 0, 'frontend should not persist pending-send state');
 assert.equal(clearedPendingCalls, 0, 'frontend should not clear any pending-send cache because none exists');
 assert.equal(attentionRefreshes, 0, 'frontend should not synthesize unread or send-failure attention state');
+
+const attachContext = createBaseContext();
+let attachStatusUpdate = null;
+let queuedPanelSession = null;
+let attachRenderCalls = 0;
+let browserStateSyncs = 0;
+let forkSyncs = 0;
+let shareSyncs = 0;
+let modelLoads = 0;
+let draftRestores = 0;
+
+attachContext.currentTokens = 99;
+attachContext.contextTokens = { style: { display: 'block' } };
+attachContext.compactBtn = { style: { display: 'block' } };
+attachContext.dropToolsBtn = { style: { display: 'block' } };
+attachContext.headerTitle = { textContent: '' };
+attachContext.inlineToolSelect = { value: '' };
+attachContext.selectedTool = 'claude';
+attachContext.toolsList = [{ id: 'claude' }, { id: 'codex' }];
+attachContext.getSessionDisplayName = (session) => session?.name || 'Session';
+attachContext.updateStatus = (state, session) => {
+  attachStatusUpdate = { state, session };
+};
+attachContext.renderQueuedMessagePanel = (session) => {
+  queuedPanelSession = session;
+};
+attachContext.loadModelsForCurrentTool = () => {
+  modelLoads += 1;
+};
+attachContext.restoreDraft = () => {
+  draftRestores += 1;
+};
+attachContext.renderSessionList = () => {
+  attachRenderCalls += 1;
+};
+attachContext.syncBrowserState = () => {
+  browserStateSyncs += 1;
+};
+attachContext.syncForkButton = () => {
+  forkSyncs += 1;
+};
+attachContext.syncShareButton = () => {
+  shareSyncs += 1;
+};
+
+vm.runInNewContext(applyAttachedSessionStateSnippet, attachContext, {
+  filename: 'chat-apply-attached-session-state-runtime.js',
+});
+
+const attachedSession = {
+  id: 'session-attach',
+  name: 'Render validation session',
+  tool: 'codex',
+  activity: createSessionActivity({ runState: 'idle' }),
+};
+attachContext.applyAttachedSessionState(attachedSession.id, attachedSession);
+
+assert.equal(attachContext.currentSessionId, attachedSession.id, 'attaching a session should set the current session id');
+assert.equal(attachContext.hasAttachedSession, true, 'attaching a session should mark the UI as attached');
+assert.equal(attachContext.currentTokens, 0, 'attaching a session should reset the live-context token counter');
+assert.equal(attachContext.headerTitle.textContent, 'Render validation session', 'attaching a session should refresh the header title');
+assert.equal(attachContext.inlineToolSelect.value, 'codex', 'attaching a session should update the inline tool picker');
+assert.equal(attachContext.selectedTool, 'codex', 'attaching a session should adopt the backend tool selection');
+assert.equal(modelLoads, 1, 'attaching a session should refresh models when the tool changes');
+assert.equal(draftRestores, 1, 'attaching a session should restore the local draft');
+assert.equal(attachRenderCalls, 1, 'attaching a session should rerender the session list');
+assert.equal(browserStateSyncs, 1, 'attaching a session should sync browser navigation state');
+assert.equal(forkSyncs, 1, 'attaching a session should refresh fork affordances');
+assert.equal(shareSyncs, 1, 'attaching a session should refresh share affordances');
+assert.deepEqual(attachStatusUpdate, { state: 'connected', session: attachedSession }, 'attaching a session should update the status indicator');
+assert.equal(queuedPanelSession, attachedSession, 'attaching a session should refresh the queued-message panel');
 
 console.log('test-chat-session-state: ok');

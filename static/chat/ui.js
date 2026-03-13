@@ -697,7 +697,11 @@ function renderImagePreviews() {
   imgPreviewStrip.innerHTML = "";
   if (pendingImages.length === 0) {
     imgPreviewStrip.classList.remove("has-images");
-    if (typeof syncInputHeightForLayout === "function") syncInputHeightForLayout();
+    if (typeof requestLayoutPass === "function") {
+      requestLayoutPass("composer-images");
+    } else if (typeof syncInputHeightForLayout === "function") {
+      syncInputHeightForLayout();
+    }
     return;
   }
   imgPreviewStrip.classList.add("has-images");
@@ -721,7 +725,11 @@ function renderImagePreviews() {
     item.appendChild(removeBtn);
     imgPreviewStrip.appendChild(item);
   });
-  if (typeof syncInputHeightForLayout === "function") syncInputHeightForLayout();
+  if (typeof requestLayoutPass === "function") {
+    requestLayoutPass("composer-images");
+  } else if (typeof syncInputHeightForLayout === "function") {
+    syncInputHeightForLayout();
+  }
 }
 
 imgBtn.addEventListener("click", () => imgFileInput.click());

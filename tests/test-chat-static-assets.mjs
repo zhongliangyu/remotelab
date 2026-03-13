@@ -145,15 +145,16 @@ async function main() {
     assert.doesNotMatch(page.text, /id="tabProgress"/);
     assert.doesNotMatch(page.text, /id="saveTemplateBtn"/);
     assert.doesNotMatch(page.text, /id="sessionTemplateSelect"/);
+    assert.match(page.text, /<div class="app-shell">/, 'chat page should render inside a dedicated app shell');
     assert.match(page.text, /--app-height:\s*100dvh/);
-    assert.match(page.text, /--app-top-offset:\s*0px/);
     assert.match(page.text, /--keyboard-inset-height:\s*0px/);
+    assert.match(page.text, /\.app-shell\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\);/, 'app shell should reserve a fixed header row and a flexible body row');
     assert.match(page.text, /\.app-container\s*\{[\s\S]*?min-height:\s*0;/);
-    assert.match(page.text, /\.chat-area\s*\{[\s\S]*?min-height:\s*0;/);
+    assert.match(page.text, /\.chat-area\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0, 1fr\) auto auto;[\s\S]*?min-height:\s*0;/, 'chat area should model content, queued panel, and composer as explicit rows');
     assert.match(page.text, /\.messages\s*\{[\s\S]*?min-height:\s*0;/);
-    assert.match(page.text, /@media \(max-width: 767px\)\s*\{[\s\S]*?body\s*\{[\s\S]*?position:\s*fixed;/);
     assert.match(page.text, /body\.keyboard-open \.messages/);
     assert.match(page.text, /body\.keyboard-open \.input-area/);
+    assert.doesNotMatch(page.text, /--app-top-offset/);
     assert.ok(!page.text.includes('/chat.js?v='), 'chat page should not pin the chat frontend to a versioned URL');
     assert.match(page.text, /\/marked\.min\.js\?v=/, 'chat page should fingerprint marked.min.js alongside the split chat assets');
     assert.match(page.text, /\/manifest\.json\?v=/, 'chat page should fingerprint the manifest URL so installed PWAs refresh policy changes');
@@ -246,19 +247,22 @@ async function main() {
     const toolingAsset = await request(port, 'GET', '/chat/tooling.js');
     assert.equal(toolingAsset.status, 200, 'tooling asset should load');
     assert.match(toolingAsset.text, /document\.documentElement\.style\.setProperty\("--app-height"/);
-    assert.match(toolingAsset.text, /document\.documentElement\.style\.setProperty\("--app-top-offset"/);
     assert.match(toolingAsset.text, /document\.documentElement\.style\.setProperty\("--keyboard-inset-height"/);
-    assert.match(toolingAsset.text, /window\.visualViewport\?\.addEventListener\("resize", syncViewportHeight\)/);
-    assert.match(toolingAsset.text, /window\.visualViewport\?\.addEventListener\("scroll", syncViewportHeight\)/);
+    assert.match(toolingAsset.text, /function requestLayoutPass\(/);
+    assert.match(toolingAsset.text, /window\.RemoteLabLayout = \{/);
+    assert.match(toolingAsset.text, /window\.visualViewport\?\.addEventListener\("resize", \(\) => requestLayoutPass\("visual-viewport-resize"\)\)/);
+    assert.doesNotMatch(toolingAsset.text, /window\.visualViewport\?\.addEventListener\("scroll"/);
     assert.match(toolingAsset.text, /function focusComposer\(/);
 
     const uiAsset = await request(port, 'GET', '/chat/ui.js');
     assert.equal(uiAsset.status, 200, 'ui asset should load');
     assert.match(uiAsset.text, /focusComposer\(\{ preventScroll: true \}\)/);
+    assert.match(uiAsset.text, /requestLayoutPass\("composer-images"\)/);
 
     const composeAsset = await request(port, 'GET', '/chat/compose.js');
     assert.equal(composeAsset.status, 200, 'compose asset should load');
     assert.match(composeAsset.text, /focusComposer\(\{ force: true, preventScroll: true \}\)/);
+    assert.match(composeAsset.text, /window\.RemoteLabLayout\?\.subscribe/);
 
     const tokenLogin = await request(
       port,

@@ -1,46 +1,119 @@
 // ---- Responsive layout ----
 const MOBILE_KEYBOARD_OPEN_THRESHOLD = 120;
+const layoutSubscribers = new Set();
+let layoutPassHandle = 0;
+let pendingLayoutReason = null;
+let currentLayoutState = null;
+
+function scheduleAnimationFrame(callback) {
+  if (typeof window?.requestAnimationFrame === "function") {
+    return window.requestAnimationFrame(callback);
+  }
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+  callback();
+  return 0;
+}
 
 function getLayoutViewportHeightPx() {
   const innerHeight = window.innerHeight || document.documentElement.clientHeight || 0;
   return Math.round(innerHeight);
 }
 
-function getViewportMetrics() {
-  const viewport = window.visualViewport;
-  const visualHeight = viewport?.height;
-  const height = Number.isFinite(visualHeight) && visualHeight > 0
-    ? Math.round(visualHeight)
-    : getLayoutViewportHeightPx();
-  const rawOffsetTop = viewport?.offsetTop;
-  const offsetTop = Number.isFinite(rawOffsetTop) && rawOffsetTop > 0
-    ? Math.round(rawOffsetTop)
+function getVisualViewportHeightPx() {
+  const visualHeight = window.visualViewport?.height;
+  if (Number.isFinite(visualHeight) && visualHeight > 0) {
+    return Math.round(visualHeight);
+  }
+  return 0;
+}
+
+function buildLayoutState() {
+  const layoutViewportHeight = getLayoutViewportHeightPx();
+  const visualViewportHeight = getVisualViewportHeightPx();
+  const viewportHeight = visualViewportHeight > 0
+    ? Math.min(layoutViewportHeight || visualViewportHeight, visualViewportHeight)
+    : layoutViewportHeight;
+  const keyboardInsetHeight = !isDesktop && layoutViewportHeight > 0
+    ? Math.max(0, layoutViewportHeight - viewportHeight)
     : 0;
-  const layoutHeight = getLayoutViewportHeightPx() || height;
-  const keyboardInsetHeight = Math.max(0, layoutHeight - height - offsetTop);
-  return { height, offsetTop, keyboardInsetHeight };
+  return {
+    isDesktop,
+    layoutViewportHeight,
+    viewportHeight,
+    keyboardInsetHeight,
+    keyboardOpen: !isDesktop && keyboardInsetHeight >= MOBILE_KEYBOARD_OPEN_THRESHOLD,
+  };
+}
+
+function applyLayoutState(state) {
+  if (state.viewportHeight > 0) {
+    document.documentElement.style.setProperty("--app-height", `${state.viewportHeight}px`);
+  }
+  document.documentElement.style.setProperty("--keyboard-inset-height", `${state.keyboardInsetHeight}px`);
+  document.documentElement.classList.toggle("keyboard-open", state.keyboardOpen);
+  document.body?.classList.toggle("keyboard-open", state.keyboardOpen);
+}
+
+function getLayoutState() {
+  if (!currentLayoutState) {
+    currentLayoutState = buildLayoutState();
+    applyLayoutState(currentLayoutState);
+  }
+  return currentLayoutState;
+}
+
+function runLayoutPass(reason = "layout") {
+  layoutPassHandle = 0;
+  pendingLayoutReason = null;
+  currentLayoutState = buildLayoutState();
+  applyLayoutState(currentLayoutState);
+  for (const subscriber of layoutSubscribers) {
+    try {
+      subscriber(currentLayoutState, reason);
+    } catch (error) {
+      console.warn("[layout] Subscriber failed:", error.message);
+    }
+  }
+  return currentLayoutState;
+}
+
+function requestLayoutPass(reason = "layout") {
+  pendingLayoutReason = reason;
+  if (layoutPassHandle) {
+    return layoutPassHandle;
+  }
+  layoutPassHandle = scheduleAnimationFrame(() => {
+    runLayoutPass(pendingLayoutReason || reason);
+  });
+  return layoutPassHandle;
+}
+
+function subscribeLayoutPass(subscriber, { immediate = false } = {}) {
+  if (typeof subscriber !== "function") {
+    return () => {};
+  }
+  layoutSubscribers.add(subscriber);
+  if (immediate) {
+    subscriber(getLayoutState(), "subscribe");
+  }
+  return () => {
+    layoutSubscribers.delete(subscriber);
+  };
 }
 
 function getViewportHeightPx() {
-  return getViewportMetrics().height;
+  return getLayoutState().viewportHeight;
 }
 
 function syncViewportHeight() {
-  const { height, offsetTop, keyboardInsetHeight } = getViewportMetrics();
-  if (height > 0) {
-    document.documentElement.style.setProperty("--app-height", `${height}px`);
-  }
-  document.documentElement.style.setProperty("--app-top-offset", `${offsetTop}px`);
-  document.documentElement.style.setProperty("--keyboard-inset-height", `${keyboardInsetHeight}px`);
-
-  const keyboardOpen = !isDesktop && keyboardInsetHeight >= MOBILE_KEYBOARD_OPEN_THRESHOLD;
-  document.documentElement.classList.toggle("keyboard-open", keyboardOpen);
-  document.body?.classList.toggle("keyboard-open", keyboardOpen);
+  return runLayoutPass("viewport");
 }
 
 function focusComposer({ force = false, preventScroll = false } = {}) {
   if (!msgInput?.focus) return false;
-  if (!force && !isDesktop) return false;
+  if (!force && !getLayoutState().isDesktop) return false;
   try {
     if (preventScroll) {
       msgInput.focus({ preventScroll: true });
@@ -52,6 +125,15 @@ function focusComposer({ force = false, preventScroll = false } = {}) {
   }
   return true;
 }
+
+window.RemoteLabLayout = {
+  getState: getLayoutState,
+  getViewportHeight: getViewportHeightPx,
+  requestPass: requestLayoutPass,
+  subscribe: subscribeLayoutPass,
+  syncNow: runLayoutPass,
+  focusComposer,
+};
 
 function initResponsiveLayout() {
   const mq = window.matchMedia("(min-width: 768px)");
@@ -67,12 +149,10 @@ function initResponsiveLayout() {
     } else {
       sidebarOverlay.classList.remove("collapsed");
     }
-    syncViewportHeight();
+    runLayoutPass("breakpoint");
   }
-  syncViewportHeight();
-  window.addEventListener("resize", syncViewportHeight);
-  window.visualViewport?.addEventListener("resize", syncViewportHeight);
-  window.visualViewport?.addEventListener("scroll", syncViewportHeight);
+  window.addEventListener("resize", () => requestLayoutPass("window-resize"));
+  window.visualViewport?.addEventListener("resize", () => requestLayoutPass("visual-viewport-resize"));
   mq.addEventListener("change", onBreakpointChange);
   onBreakpointChange(mq);
 }

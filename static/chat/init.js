@@ -17,7 +17,11 @@ function applyVisitorMode() {
   if (compactBtn) compactBtn.style.display = "none";
   if (dropToolsBtn) dropToolsBtn.style.display = "none";
   if (contextTokens) contextTokens.style.display = "none";
-  if (typeof syncInputHeightForLayout === "function") syncInputHeightForLayout();
+  if (typeof requestLayoutPass === "function") {
+    requestLayoutPass("visitor-mode");
+  } else if (typeof syncInputHeightForLayout === "function") {
+    syncInputHeightForLayout();
+  }
   syncForkButton();
   syncShareButton();
 }
