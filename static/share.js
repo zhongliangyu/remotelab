@@ -228,11 +228,13 @@
   }
 
   function createAttachmentNode(attachment) {
-    if (!attachment?.data) return null;
     const mimeType = typeof attachment?.mimeType === "string"
       ? attachment.mimeType
       : "application/octet-stream";
-    const src = `data:${mimeType};base64,${attachment.data}`;
+    const src = typeof attachment?.url === "string" && attachment.url
+      ? attachment.url
+      : (attachment?.data ? `data:${mimeType};base64,${attachment.data}` : "");
+    if (!src) return null;
     if (mimeType.startsWith("image/")) {
       const imgEl = document.createElement("img");
       imgEl.src = src;

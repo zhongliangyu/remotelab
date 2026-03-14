@@ -66,7 +66,14 @@ import {
   withSessionsMetaMutation,
 } from './session-meta-store.mjs';
 import { dispatchSessionEmailCompletionTargets, sanitizeEmailCompletionTargets } from '../lib/agent-mail-completion-targets.mjs';
-import { createApp, getApp, normalizeAppId, resolveEffectiveAppId } from './apps.mjs';
+import {
+  DEFAULT_APP_ID,
+  createApp,
+  getApp,
+  getBuiltinApp,
+  normalizeAppId,
+  resolveEffectiveAppId,
+} from './apps.mjs';
 import { ensureDir } from './fs-utils.mjs';
 
 const MIME_EXTENSIONS = {
@@ -260,6 +267,52 @@ function buildForkSessionName(session) {
 function normalizeSessionAppName(value) {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ');
+}
+
+function normalizeSessionSourceName(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function isTemplateAppScopeId(appId) {
+  const normalized = normalizeAppId(appId);
+  return /^app[_-]/i.test(normalized);
+}
+
+function formatSessionSourceNameFromId(sourceId) {
+  const normalized = typeof sourceId === 'string' ? sourceId.trim() : '';
+  if (!normalized) return 'Chat';
+  return normalized
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function resolveSessionSourceId(meta) {
+  const explicitSourceId = normalizeAppId(meta?.sourceId);
+  if (explicitSourceId) return explicitSourceId;
+
+  const legacyAppId = normalizeAppId(meta?.appId);
+  if (legacyAppId && !isTemplateAppScopeId(legacyAppId)) {
+    return legacyAppId;
+  }
+
+  return DEFAULT_APP_ID;
+}
+
+function resolveSessionSourceName(meta, sourceId = resolveSessionSourceId(meta)) {
+  const explicitSourceName = normalizeSessionSourceName(meta?.sourceName);
+  if (explicitSourceName) return explicitSourceName;
+
+  const legacyAppId = normalizeAppId(meta?.appId);
+  if (legacyAppId && !isTemplateAppScopeId(legacyAppId) && legacyAppId === sourceId) {
+    const legacyAppName = normalizeSessionAppName(meta?.appName);
+    if (legacyAppName) return legacyAppName;
+  }
+
+  const builtinSource = getBuiltinApp(sourceId);
+  if (builtinSource?.name) return builtinSource.name;
+
+  return formatSessionSourceNameFromId(sourceId);
 }
 
 function getFollowUpQueue(meta) {
@@ -764,9 +817,12 @@ async function enrichSessionMeta(meta) {
   const queuedCount = getFollowUpQueueCount(meta);
   const runActivity = await resolveSessionRunActivity(meta);
   const { followUpQueue, recentFollowUpRequestIds, activeRunId, activeRun, ...rest } = meta;
+  const sourceId = resolveSessionSourceId(meta);
   return {
     ...rest,
     appId: resolveEffectiveAppId(meta.appId),
+    sourceId,
+    sourceName: resolveSessionSourceName(meta, sourceId),
     latestSeq: snapshot.latestSeq,
     lastEventAt: snapshot.lastEventAt,
     messageCount: snapshot.messageCount,
@@ -864,7 +920,7 @@ function broadcastSessionInvalidation(sessionId) {
     const authSession = client._authSession;
     if (!authSession) return false;
     if (authSession.role === 'owner') {
-      return !session?.visitorId && shouldExposeSession(session);
+      return shouldExposeSession(session);
     }
     if (authSession.role === 'visitor') {
       return authSession.sessionId === sessionId;
@@ -1977,14 +2033,16 @@ export async function startDetachedRunObservers() {
   await resumePendingCompletionTargets();
 }
 
-export async function listSessions({ includeVisitor = false, includeArchived = true, appId = '', includeQueuedMessages = false } = {}) {
+export async function listSessions({ includeVisitor = false, includeArchived = true, appId = '', sourceId = '', includeQueuedMessages = false } = {}) {
   const metas = await reconcileSessionsMetaList(await loadSessionsMeta());
   const normalizedAppId = normalizeAppId(appId);
+  const normalizedSourceId = normalizeAppId(sourceId);
   const filtered = metas
     .filter((meta) => includeVisitor || !meta.visitorId)
     .filter((meta) => shouldExposeSession(meta))
     .filter((meta) => includeArchived || !meta.archived)
     .filter((meta) => !normalizedAppId || resolveEffectiveAppId(meta.appId) === normalizedAppId)
+    .filter((meta) => !normalizedSourceId || resolveSessionSourceId(meta) === normalizedSourceId)
     .sort((a, b) => (
       getSessionPinSortRank(b) - getSessionPinSortRank(a)
       || getSessionSortTime(b) - getSessionSortTime(a)
@@ -2013,6 +2071,8 @@ export async function createSession(folder, tool, name, extra = {}) {
   const externalTriggerId = typeof extra.externalTriggerId === 'string' ? extra.externalTriggerId.trim() : '';
   const requestedAppId = normalizeAppId(extra.appId);
   const requestedAppName = normalizeSessionAppName(extra.appName);
+  const requestedSourceId = normalizeAppId(extra.sourceId);
+  const requestedSourceName = normalizeSessionSourceName(extra.sourceName);
   const created = await withSessionsMetaMutation(async (metas, saveSessionsMeta) => {
     if (externalTriggerId) {
       const existingIndex = metas.findIndex((meta) => meta.externalTriggerId === externalTriggerId && !meta.archived);
@@ -2035,6 +2095,16 @@ export async function createSession(folder, tool, name, extra = {}) {
 
         if (requestedAppName && updated.appName !== requestedAppName) {
           updated.appName = requestedAppName;
+          changed = true;
+        }
+
+        if (requestedSourceId && updated.sourceId !== requestedSourceId) {
+          updated.sourceId = requestedSourceId;
+          changed = true;
+        }
+
+        if (requestedSourceName && updated.sourceName !== requestedSourceName) {
+          updated.sourceName = requestedSourceName;
           changed = true;
         }
 
@@ -2088,6 +2158,8 @@ export async function createSession(folder, tool, name, extra = {}) {
     if (group) session.group = group;
     if (description) session.description = description;
     if (requestedAppName) session.appName = requestedAppName;
+    if (requestedSourceId) session.sourceId = requestedSourceId;
+    if (requestedSourceName) session.sourceName = requestedSourceName;
     if (extra.visitorId) session.visitorId = extra.visitorId;
     if (extra.systemPrompt) session.systemPrompt = extra.systemPrompt;
     if (extra.internalRole) session.internalRole = extra.internalRole;
@@ -2104,7 +2176,7 @@ export async function createSession(folder, tool, name, extra = {}) {
     return { session, created: true, changed: true };
   });
 
-  if ((created.created || created.changed) && !created.session.visitorId && shouldExposeSession(created.session)) {
+  if ((created.created || created.changed) && shouldExposeSession(created.session)) {
     broadcastSessionsInvalidation();
   }
 
@@ -2137,7 +2209,7 @@ export async function setSessionArchived(id, archived = true) {
     return enrichSessionMeta(result.meta);
   }
 
-  if (!current.visitorId) {
+  if (shouldExposeSession(current)) {
     broadcastSessionsInvalidation();
   }
   broadcastSessionInvalidation(id);
@@ -2159,7 +2231,7 @@ export async function setSessionPinned(id, pinned = true) {
   });
 
   if (!result.meta) return null;
-  if (result.changed && !result.meta.visitorId) {
+  if (result.changed && shouldExposeSession(result.meta)) {
     broadcastSessionsInvalidation();
   }
   if (result.changed) {
@@ -2399,7 +2471,7 @@ export async function updateSessionRuntimePreferences(id, patch = {}) {
     await clearPersistedResumeIds(id);
   }
   broadcastSessionInvalidation(id);
-  if (!result.meta.visitorId) {
+  if (shouldExposeSession(result.meta)) {
     broadcastSessionsInvalidation();
   }
   return enrichSessionMeta(result.meta);

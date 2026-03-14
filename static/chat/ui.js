@@ -493,6 +493,44 @@ function renderSessionMessageCount(session) {
   return `<span class="session-item-count" title="Active messages in the current context">${label}</span>`;
 }
 
+function renderSessionScopeContext(session) {
+  const parts = [];
+  const sourceName = typeof getEffectiveSessionSourceName === "function"
+    ? getEffectiveSessionSourceName(session)
+    : "";
+  if (sourceName) {
+    parts.push(`<span title="Session source">${esc(sourceName)}</span>`);
+  }
+
+  const templateAppId = typeof getEffectiveSessionTemplateAppId === "function"
+    ? getEffectiveSessionTemplateAppId(session)
+    : "";
+  if (templateAppId) {
+    const appEntry = typeof getSessionAppCatalogEntry === "function"
+      ? getSessionAppCatalogEntry(templateAppId)
+      : null;
+    const appName = appEntry?.name || session?.appName || "App";
+    parts.push(`<span title="Session app">App: ${esc(appName)}</span>`);
+  }
+
+  if (activeUserFilter === USER_FILTER_ALL_VALUE || session?.visitorId) {
+    parts.push(`<span title="Session owner scope">${session?.visitorId ? "Visitor" : "Owner"}</span>`);
+  }
+
+  return parts;
+}
+
+function getFilteredSessionEmptyText({ archived = false } = {}) {
+  const base = archived ? "No archived sessions" : "No sessions yet";
+  if (
+    activeAppFilter === APP_FILTER_ALL_VALUE
+    && activeSessionAppFilter === APP_FILTER_ALL_VALUE
+  ) {
+    return base;
+  }
+  return archived ? "No matching archived sessions" : "No matching sessions";
+}
+
 function getSessionGroupInfo(session) {
   const group = typeof session?.group === "string" ? session.group.trim() : "";
   if (group) {
@@ -535,6 +573,7 @@ function createActiveSessionItem(session) {
 
   const displayName = getSessionDisplayName(session);
   const metaParts = [];
+  metaParts.push(...renderSessionScopeContext(session));
   const countHtml = renderSessionMessageCount(session);
   if (countHtml) metaParts.push(countHtml);
   for (const indicator of statusSummary.indicators) {
@@ -651,9 +690,7 @@ function renderSessionList() {
   if (pinnedSessions.length === 0 && visibleSessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "session-filter-empty";
-    empty.textContent = activeAppFilter === APP_FILTER_ALL_VALUE
-      ? "No sessions yet"
-      : `No sessions in ${getAppCatalogEntry(activeAppFilter).name}`;
+    empty.textContent = getFilteredSessionEmptyText();
     sessionList.appendChild(empty);
   }
 
@@ -685,9 +722,7 @@ function renderArchivedSection() {
   if (archivedSessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "archived-empty";
-    empty.textContent = activeAppFilter === APP_FILTER_ALL_VALUE
-      ? "No archived sessions"
-      : `No archived sessions in ${getAppCatalogEntry(activeAppFilter).name}`;
+    empty.textContent = getFilteredSessionEmptyText({ archived: true });
     items.appendChild(empty);
   } else {
     for (const s of archivedSessions) {
@@ -790,11 +825,15 @@ function createNewSessionShortcut({ closeSidebar = true } = {}) {
   if (closeSidebar && !isDesktop) closeSidebarFn();
   const tool = preferredTool || selectedTool || toolsList[0]?.id;
   if (!tool) return false;
+  const sourceId = activeAppFilter !== APP_FILTER_ALL_VALUE ? activeAppFilter : DEFAULT_APP_ID;
+  const sourceName = getAppCatalogEntry(sourceId)?.name || DEFAULT_APP_NAME;
   return dispatchAction({
     action: "create",
     folder: "~",
     tool,
-    appId: activeAppFilter !== APP_FILTER_ALL_VALUE ? activeAppFilter : DEFAULT_APP_ID,
+    sourceId,
+    sourceName,
+    appId: activeSessionAppFilter !== APP_FILTER_ALL_VALUE ? activeSessionAppFilter : "",
   });
 }
 

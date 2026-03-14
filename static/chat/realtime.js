@@ -62,6 +62,8 @@ async function dispatchAction(msg) {
             tool: msg.tool,
             name: msg.name || "",
             appId: msg.appId || "",
+            sourceId: msg.sourceId || "",
+            sourceName: msg.sourceName || "",
           }),
         });
         if (data.session) {
