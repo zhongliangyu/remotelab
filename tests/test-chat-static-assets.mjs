@@ -260,6 +260,16 @@ async function main() {
     assert.ok(splitAsset.headers.etag, 'split asset should expose an ETag');
     assert.match(splitAsset.text, /const buildInfo = window\.__REMOTELAB_BUILD__ \|\| \{\};/);
 
+    const sessionHttpAsset = await request(port, 'GET', '/chat/session-http.js');
+    assert.equal(sessionHttpAsset.status, 200, 'session http asset should load');
+    if (/getEffectiveSessionAppId\(/.test(sessionHttpAsset.text)) {
+      assert.match(
+        splitAsset.text,
+        /function getEffectiveSessionAppId\(/,
+        'bootstrap asset should define the effective app helper used by session-http',
+      );
+    }
+
     const versionedSplitAsset = await request(port, 'GET', '/chat/bootstrap.js?v=test-build');
     assert.equal(versionedSplitAsset.status, 200, 'versioned split chat asset should load');
     assert.equal(

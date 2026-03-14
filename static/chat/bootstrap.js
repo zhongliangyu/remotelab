@@ -571,6 +571,10 @@ function formatAppNameFromId(appId) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function getEffectiveSessionAppId(session) {
+  return normalizeAppId(session?.appId, { fallbackDefault: true });
+}
+
 function getEffectiveSessionSourceId(session) {
   const explicitSourceId = normalizeAppId(session?.sourceId);
   if (explicitSourceId) return explicitSourceId;
