@@ -79,7 +79,6 @@ try {
 
   assert.equal(await getApp('feishu'), null);
   assert.equal(await getApp('app_video_cut'), null, 'Video Cut should no longer ship as a built-in app');
-  assert.equal(await getAppByShareToken('share_builtin_video_cut_84f1b7fa9de446c59994a1d4a57f1316'), null);
 
   const custom = await createApp({
     name: 'Docs Portal',

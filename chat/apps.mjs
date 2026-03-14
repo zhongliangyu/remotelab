@@ -1,10 +1,39 @@
 import { randomBytes } from 'crypto';
 import { dirname } from 'path';
-import { APPS_FILE } from '../lib/config.mjs';
+import { APPS_FILE, CHAT_SESSIONS_FILE, USERS_FILE, VISITORS_FILE } from '../lib/config.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
 
 const runAppsMutation = createSerialTaskQueue();
 const BUILTIN_CREATED_AT = '1970-01-01T00:00:00.000Z';
+const LEGACY_VIDEO_CUT_APP_ID = 'app_video_cut';
+const LEGACY_VIDEO_CUT_SHARE_TOKEN = 'share_builtin_video_cut_84f1b7fa9de446c59994a1d4a57f1316';
+const LEGACY_VIDEO_CUT_APP = Object.freeze({
+  id: LEGACY_VIDEO_CUT_APP_ID,
+  name: 'Video Cut',
+  tool: 'codex',
+  shareToken: LEGACY_VIDEO_CUT_SHARE_TOKEN,
+  systemPrompt: [
+    'You are the Video Cut app inside RemoteLab.',
+    'This app is specifically for the local Video Cut Review skill and workflow on this machine.',
+    'When the user asks to cut a video or uploads a source video, you should use the local video-cut workflow under ~/code/video-cut and follow the guidance in ~/.remotelab/skills/video-cut-review.md when needed.',
+    'Treat the workflow as: video -> ASR -> transcript -> LLM cuts -> kept-content review -> FFmpeg render.',
+    'Never skip the kept-content review gate before the real render.',
+    'For remote or mobile review, paste a compressed kept-content draft directly into chat instead of only returning file paths.',
+    'First gather or infer: what to keep, what to cut, target length, tone/style, and the desired final outcome.',
+    'Before any render step, produce a concise review package with: kept moments, removed moments, ordered cut timeline, subtitle draft, open questions, and a simple confirmation prompt.',
+    'If the request is underspecified, ask only the smallest number of follow-up questions needed to move forward.',
+    'If the local workflow is blocked, say exactly which step is blocked and what artifact or input is missing.',
+    'Keep the experience mobile-friendly and concrete.',
+    'Always answer in the user\'s language.',
+    'Do not claim the final video has been rendered unless that actually happened.',
+  ].join(' '),
+  welcomeMessage: [
+    '请上传一段原始视频，并简单说明你想保留什么、想剪掉什么，以及目标成片大概多长。',
+    '我会使用本机的 Video Cut Review / video-cut 工作流来处理这件事，而不是只做泛泛的聊天建议。',
+    '我会先给你一版 review：保留内容、剪辑时间线、字幕草稿；等你确认后，再进入正式剪辑。',
+  ].join('\n\n'),
+  createdAt: BUILTIN_CREATED_AT,
+});
 
 export const DEFAULT_APP_ID = 'chat';
 export const EMAIL_APP_ID = 'email';
@@ -79,6 +108,50 @@ function cloneApp(app) {
   return app ? JSON.parse(JSON.stringify(app)) : null;
 }
 
+function findLegacyVideoCutAppRecord(apps = []) {
+  return apps.find((app) => app && (app.id === LEGACY_VIDEO_CUT_APP_ID || app.shareToken === LEGACY_VIDEO_CUT_SHARE_TOKEN)) || null;
+}
+
+async function hasLegacyVideoCutReferences() {
+  const [users, visitors, sessions] = await Promise.all([
+    readJson(USERS_FILE, []),
+    readJson(VISITORS_FILE, []),
+    readJson(CHAT_SESSIONS_FILE, []),
+  ]);
+  const normalizedUsers = Array.isArray(users) ? users : [];
+  if (normalizedUsers.some((user) => user && !user.deleted && (
+    user.defaultAppId === LEGACY_VIDEO_CUT_APP_ID
+    || (Array.isArray(user.appIds) && user.appIds.includes(LEGACY_VIDEO_CUT_APP_ID))
+  ))) {
+    return true;
+  }
+
+  const normalizedVisitors = Array.isArray(visitors) ? visitors : [];
+  if (normalizedVisitors.some((visitor) => visitor && !visitor.deleted && visitor.appId === LEGACY_VIDEO_CUT_APP_ID)) {
+    return true;
+  }
+
+  const normalizedSessions = Array.isArray(sessions) ? sessions : [];
+  return normalizedSessions.some((session) => session && !session.deleted && normalizeAppId(session.appId) === LEGACY_VIDEO_CUT_APP_ID);
+}
+
+async function materializeLegacyVideoCutApp({ force = false } = {}) {
+  return runAppsMutation(async () => {
+    const apps = await loadApps();
+    const existing = findLegacyVideoCutAppRecord(apps);
+    if (existing) {
+      return existing.deleted ? null : cloneApp(existing);
+    }
+    if (!force && !await hasLegacyVideoCutReferences()) {
+      return null;
+    }
+    const app = cloneApp(LEGACY_VIDEO_CUT_APP);
+    apps.push(app);
+    await saveApps(apps);
+    return app;
+  });
+}
+
 function normalizeTemplateContext(templateContext) {
   const content = typeof templateContext?.content === 'string'
     ? templateContext.content.trim()
@@ -151,20 +224,33 @@ async function saveApps(list) {
 }
 
 export async function listApps() {
+  await materializeLegacyVideoCutApp();
   return mergeApps(await loadApps());
 }
 
 export async function getApp(id) {
   const builtin = getBuiltinApp(id);
   if (builtin) return builtin;
-  return (await loadApps()).find((app) => app.id === id && !app.deleted) || null;
+  const apps = await loadApps();
+  const existing = apps.find((app) => app.id === id);
+  if (existing) return existing.deleted ? null : existing;
+  if (normalizeAppId(id) === LEGACY_VIDEO_CUT_APP_ID) {
+    return materializeLegacyVideoCutApp();
+  }
+  return null;
 }
 
 export async function getAppByShareToken(shareToken) {
   if (!shareToken) return null;
   const builtin = BUILTIN_APPS.find((app) => app.shareToken === shareToken);
   if (builtin) return cloneApp(builtin);
-  return (await loadApps()).find((app) => app.shareToken === shareToken && !app.deleted) || null;
+  const apps = await loadApps();
+  const existing = apps.find((app) => app.shareToken === shareToken);
+  if (existing) return existing.deleted ? null : existing;
+  if (shareToken === LEGACY_VIDEO_CUT_SHARE_TOKEN) {
+    return materializeLegacyVideoCutApp({ force: true });
+  }
+  return null;
 }
 
 export async function createApp(input = {}) {
