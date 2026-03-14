@@ -493,38 +493,70 @@ function renderSessionMessageCount(session) {
   return `<span class="session-item-count" title="Active messages in the current context">${label}</span>`;
 }
 
-function renderSessionScopeContext(session) {
+function getWorkflowStatusInfo(value) {
+  const normalized = typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[\s-]+/g, "_")
+    : "";
+  if (["waiting", "waiting_user", "waiting_for_user", "waiting_on_user", "needs_user", "needs_input"].includes(normalized)) {
+    return {
+      key: "waiting_user",
+      label: "waiting",
+      className: "status-waiting-user",
+      dotClass: "",
+      itemClass: "",
+      title: "Waiting on user input",
+    };
+  }
+  if (["done", "complete", "completed", "finished"].includes(normalized)) {
+    return {
+      key: "done",
+      label: "done",
+      className: "status-done",
+      dotClass: "",
+      itemClass: "",
+      title: "Current task complete",
+    };
+  }
+  if (["parked", "paused", "pause", "backlog", "todo"].includes(normalized)) {
+    return {
+      key: "parked",
+      label: "parked",
+      className: "status-parked",
+      dotClass: "",
+      itemClass: "",
+      title: "Parked for later",
+    };
+  }
+  return null;
+}
+
+function getSessionMetaStatusInfo(session) {
+  const liveStatus = getSessionStatusSummary(session).primary;
+  if (liveStatus?.key && liveStatus.key !== "idle") {
+    return liveStatus;
+  }
+  return getWorkflowStatusInfo(session?.workflowState) || liveStatus;
+}
+
+function buildSessionMetaParts(session) {
   const parts = [];
-  const sourceName = typeof getEffectiveSessionSourceName === "function"
-    ? getEffectiveSessionSourceName(session)
-    : "";
-  if (sourceName) {
-    parts.push(`<span title="Session source">${esc(sourceName)}</span>`);
-  }
-
-  const templateAppId = typeof getEffectiveSessionTemplateAppId === "function"
-    ? getEffectiveSessionTemplateAppId(session)
-    : "";
-  if (templateAppId) {
-    const appEntry = typeof getSessionAppCatalogEntry === "function"
-      ? getSessionAppCatalogEntry(templateAppId)
-      : null;
-    const appName = appEntry?.name || session?.appName || "App";
-    parts.push(`<span title="Session app">App: ${esc(appName)}</span>`);
-  }
-
-  if (session?.visitorId) {
-    const visitorLabel = typeof session?.visitorName === "string" && session.visitorName.trim()
-      ? `Visitor: ${session.visitorName.trim()}`
-      : (session?.visitorId ? "Visitor" : "Owner");
-    parts.push(`<span title="Session owner scope">${esc(visitorLabel)}</span>`);
-  }
-
+  const countHtml = renderSessionMessageCount(session);
+  if (countHtml) parts.push(countHtml);
+  const statusHtml = renderSessionStatusHtml(getSessionMetaStatusInfo(session));
+  if (statusHtml) parts.push(statusHtml);
   return parts;
 }
 
 function getFilteredSessionEmptyText({ archived = false } = {}) {
-  return archived ? "No archived sessions" : "No sessions yet";
+  if (archived) return "No archived sessions";
+  if (
+    activeSourceFilter !== FILTER_ALL_VALUE
+    || activeSessionAppFilter !== FILTER_ALL_VALUE
+    || activeUserFilter !== ADMIN_USER_FILTER_VALUE
+  ) {
+    return "No sessions match the current filters";
+  }
+  return "No sessions yet";
 }
 
 function getSessionGroupInfo(session) {
@@ -563,21 +595,11 @@ function formatBoardSessionTimestamp(session) {
 }
 
 function createBoardSessionCard(session) {
-  const statusSummary = getSessionStatusSummary(session, {
-    includeToolFallback: true,
-  });
   const card = document.createElement("div");
   card.className = "board-card" + (session.id === currentSessionId ? " active" : "");
 
   const displayName = getSessionDisplayName(session);
-  const metaParts = [];
-  metaParts.push(...renderSessionScopeContext(session));
-  const countHtml = renderSessionMessageCount(session);
-  if (countHtml) metaParts.push(countHtml);
-  for (const indicator of statusSummary.indicators) {
-    const statusHtml = renderSessionStatusHtml(indicator);
-    if (statusHtml) metaParts.push(statusHtml);
-  }
+  const metaParts = buildSessionMetaParts(session);
 
   const description = typeof session?.description === "string"
     ? session.description.trim()
@@ -652,10 +674,7 @@ function renderSessionBoard() {
 }
 
 function createActiveSessionItem(session) {
-  const statusSummary = getSessionStatusSummary(session, {
-    includeToolFallback: true,
-  });
-  const statusInfo = statusSummary.primary;
+  const statusInfo = getSessionMetaStatusInfo(session);
   const div = document.createElement("div");
   div.className =
     "session-item"
@@ -664,14 +683,7 @@ function createActiveSessionItem(session) {
     + (statusInfo.itemClass ? ` ${statusInfo.itemClass}` : "");
 
   const displayName = getSessionDisplayName(session);
-  const metaParts = [];
-  metaParts.push(...renderSessionScopeContext(session));
-  const countHtml = renderSessionMessageCount(session);
-  if (countHtml) metaParts.push(countHtml);
-  for (const indicator of statusSummary.indicators) {
-    const statusHtml = renderSessionStatusHtml(indicator);
-    if (statusHtml) metaParts.push(statusHtml);
-  }
+  const metaParts = buildSessionMetaParts(session);
   const metaHtml = metaParts.join(" · ");
   const pinTitle = session.pinned ? "Unpin" : "Pin";
 
@@ -938,12 +950,6 @@ function buildAppShareUrl(app) {
   return `${window.location.origin}/app/${encodeURIComponent(shareToken)}`;
 }
 
-function buildVisitorShareUrl(visitor) {
-  const shareToken = typeof visitor?.shareToken === "string" ? visitor.shareToken.trim() : "";
-  if (!shareToken) return "";
-  return `${window.location.origin}/visitor/${encodeURIComponent(shareToken)}`;
-}
-
 function summarizeAppDescription(app) {
   if (app?.id === BASIC_CHAT_TEMPLATE_APP_ID) {
     return "Default normal conversation app for everyday RemoteLab sessions.";
@@ -968,11 +974,6 @@ function getAppKindLabel(app) {
   return labels.join(" · ");
 }
 
-function setVisitorFormStatus(message) {
-  if (!visitorFormStatus) return;
-  visitorFormStatus.textContent = message || "";
-}
-
 function setTemporaryButtonText(button, nextText, durationMs = 1400) {
   if (!button) return;
   if (!button.dataset.originalLabel) {
@@ -985,7 +986,88 @@ function setTemporaryButtonText(button, nextText, durationMs = 1400) {
   }, durationMs);
 }
 
-function createSessionForApp(app, { closeSidebar = true } = {}) {
+function setUserFormStatus(message) {
+  if (!userFormStatus) return;
+  userFormStatus.textContent = message || "";
+}
+
+function setAppFormStatus(message) {
+  if (!appFormStatus) return;
+  appFormStatus.textContent = message || "";
+}
+
+function getAdminSessionPrincipal() {
+  return {
+    kind: "owner",
+    id: ADMIN_USER_FILTER_VALUE,
+    name: "Admin",
+    appIds: [],
+    defaultAppId: BASIC_CHAT_TEMPLATE_APP_ID,
+  };
+}
+
+function getManagedUserById(userId) {
+  return Array.isArray(availableUsers)
+    ? availableUsers.find((user) => user.id === userId) || null
+    : null;
+}
+
+function getPrincipalForUser(user) {
+  if (!user?.id) return getAdminSessionPrincipal();
+  return {
+    kind: "user",
+    id: user.id,
+    name: user.name || "User",
+    appIds: Array.isArray(user.appIds) ? user.appIds.filter(Boolean) : [],
+    defaultAppId: typeof user.defaultAppId === "string" ? user.defaultAppId.trim() : "",
+  };
+}
+
+function resolveSelectedSessionPrincipal() {
+  if (activeUserFilter === USER_FILTER_ALL_VALUE) {
+    return getAdminSessionPrincipal();
+  }
+  if (activeUserFilter === ADMIN_USER_FILTER_VALUE) {
+    return getAdminSessionPrincipal();
+  }
+  return getPrincipalForUser(getManagedUserById(activeUserFilter));
+}
+
+function buildSessionPrincipalPayload(principal) {
+  if (principal?.kind !== "user") return {};
+  return {
+    userId: principal.id,
+    userName: principal.name,
+  };
+}
+
+function resolveAppIdForPrincipal(principal, requestedAppId = "") {
+  const normalizedRequested = normalizeSessionAppFilter(requestedAppId);
+  if (principal?.kind !== "user") {
+    return normalizedRequested !== FILTER_ALL_VALUE
+      ? normalizedRequested
+      : BASIC_CHAT_TEMPLATE_APP_ID;
+  }
+  const allowedAppIds = Array.isArray(principal.appIds) ? principal.appIds.filter(Boolean) : [];
+  if (allowedAppIds.length === 0) {
+    return BASIC_CHAT_TEMPLATE_APP_ID;
+  }
+  if (normalizedRequested !== FILTER_ALL_VALUE && allowedAppIds.includes(normalizedRequested)) {
+    return normalizedRequested;
+  }
+  if (principal.defaultAppId && allowedAppIds.includes(principal.defaultAppId)) {
+    return principal.defaultAppId;
+  }
+  return allowedAppIds[0];
+}
+
+function getAppRecordById(appId) {
+  const normalized = normalizeAppId(appId);
+  if (!normalized) return null;
+  return getOrderedSettingsApps().find((app) => app.id === normalized) || null;
+}
+
+function createSessionForApp(app, { closeSidebar = true, principal = getAdminSessionPrincipal() } = {}) {
   if (!app?.id) return false;
   if (closeSidebar && !isDesktop) closeSidebarFn();
   const tool =
@@ -1004,45 +1086,120 @@ function createSessionForApp(app, { closeSidebar = true } = {}) {
     sourceId: DEFAULT_APP_ID,
     sourceName: DEFAULT_APP_NAME,
     appId: app.id,
+    ...buildSessionPrincipalPayload(principal),
   });
 }
 
-function getShareableAppCatalogEntry(appId) {
-  const normalized = normalizeAppId(appId);
-  if (!normalized) return null;
-  return getShareableTemplateApps().find((app) => app.id === normalized) || null;
-}
-
-function renderVisitorAppOptions() {
-  if (!newVisitorAppSelect) return;
-  const shareableApps = getShareableTemplateApps();
-  newVisitorAppSelect.innerHTML = "";
-  if (shareableApps.length === 0) {
+function renderAppToolSelectOptions(selectEl, selectedValue = "") {
+  if (!selectEl) return;
+  const toolOptions = Array.isArray(toolsList) ? toolsList : [];
+  const preferredValue = selectedValue || preferredTool || selectedTool || toolOptions[0]?.id || "";
+  selectEl.innerHTML = "";
+  if (toolOptions.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No shareable apps available";
-    newVisitorAppSelect.appendChild(option);
-    newVisitorAppSelect.disabled = true;
-    if (createVisitorBtn) createVisitorBtn.disabled = true;
-    setVisitorFormStatus("Create or enable a shareable app first.");
+    option.textContent = "No tools available";
+    selectEl.appendChild(option);
+    selectEl.disabled = true;
     return;
   }
-  for (const app of shareableApps) {
+  for (const tool of toolOptions) {
+    const option = document.createElement("option");
+    option.value = tool.id;
+    option.textContent = tool.name || tool.id;
+    selectEl.appendChild(option);
+  }
+  selectEl.disabled = false;
+  selectEl.value = toolOptions.some((tool) => tool.id === preferredValue)
+    ? preferredValue
+    : toolOptions[0].id;
+}
+
+function getSelectedNewUserAppIds() {
+  if (!newUserAppsPicker) return [];
+  return [...newUserAppsPicker.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function syncNewUserDefaultAppOptions(selectedAppIds = getSelectedNewUserAppIds()) {
+  if (!newUserDefaultAppSelect) return;
+  const selectedApps = getOrderedSettingsApps().filter((app) => selectedAppIds.includes(app.id));
+  newUserDefaultAppSelect.innerHTML = "";
+  if (selectedApps.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Choose at least one app";
+    newUserDefaultAppSelect.appendChild(option);
+    newUserDefaultAppSelect.disabled = true;
+    if (createUserBtn) createUserBtn.disabled = true;
+    return;
+  }
+
+  const currentValue = typeof newUserDefaultAppSelect.value === "string" ? newUserDefaultAppSelect.value : "";
+  for (const app of selectedApps) {
     const option = document.createElement("option");
     option.value = app.id;
     option.textContent = app.name || app.id;
-    newVisitorAppSelect.appendChild(option);
+    newUserDefaultAppSelect.appendChild(option);
   }
-  newVisitorAppSelect.disabled = false;
-  if (createVisitorBtn) createVisitorBtn.disabled = false;
-  if (!newVisitorAppSelect.value || !shareableApps.some((app) => app.id === newVisitorAppSelect.value)) {
-    const preferredApp = shareableApps.find((app) => app.id === "app_video_cut") || shareableApps[0];
-    newVisitorAppSelect.value = preferredApp?.id || "";
-  }
-  setVisitorFormStatus("Each visitor gets a dedicated link and can only use the selected app.");
+  newUserDefaultAppSelect.disabled = false;
+  if (createUserBtn) createUserBtn.disabled = false;
+  const preferredApp = selectedApps.find((app) => app.id === currentValue)
+    || selectedApps.find((app) => app.id === BASIC_CHAT_TEMPLATE_APP_ID)
+    || selectedApps[0];
+  newUserDefaultAppSelect.value = preferredApp?.id || "";
 }
 
-function focusNewVisitorComposer() {
+function renderUserAppOptions() {
+  if (!newUserAppsPicker) return;
+  const apps = getOrderedSettingsApps();
+  newUserAppsPicker.innerHTML = "";
+  if (apps.length === 0) {
+    newUserAppsPicker.innerHTML = '<div class="settings-app-empty">Create an app first.</div>';
+    syncNewUserDefaultAppOptions([]);
+    setUserFormStatus("Create at least one app before adding a user.");
+    return;
+  }
+
+  const title = document.createElement("div");
+  title.className = "settings-app-kind";
+  title.textContent = "Allowed apps";
+  newUserAppsPicker.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.className = "settings-app-picker-grid";
+  const selectedIds = getSelectedNewUserAppIds();
+  const activeIds = selectedIds.length > 0
+    ? selectedIds
+    : [BASIC_CHAT_TEMPLATE_APP_ID];
+
+  for (const app of apps) {
+    const chip = document.createElement("label");
+    chip.className = "settings-app-chip";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = app.id;
+    checkbox.checked = activeIds.includes(app.id);
+    checkbox.addEventListener("change", () => {
+      syncNewUserDefaultAppOptions();
+    });
+
+    const text = document.createElement("span");
+    text.textContent = app.name || app.id;
+
+    chip.appendChild(checkbox);
+    chip.appendChild(text);
+    grid.appendChild(chip);
+  }
+
+  newUserAppsPicker.appendChild(grid);
+  syncNewUserDefaultAppOptions(activeIds);
+  setUserFormStatus("Admin stays the default view. New users get a starter session automatically.");
+}
+
+function focusNewUserComposer() {
   if (typeof switchTab === "function") {
     switchTab("settings");
   }
@@ -1050,43 +1207,158 @@ function focusNewVisitorComposer() {
   if (typeof fetchAppsList === "function") {
     void fetchAppsList().catch(() => {});
   }
-  if (typeof fetchVisitorsList === "function") {
-    void fetchVisitorsList().catch(() => {});
+  if (typeof fetchUsersList === "function") {
+    void fetchUsersList().catch(() => {});
   }
   window.setTimeout(() => {
-    newVisitorNameInput?.focus();
-    newVisitorNameInput?.select?.();
+    newUserNameInput?.focus();
+    newUserNameInput?.select?.();
   }, 0);
   return true;
 }
 
-async function handleCreateVisitor() {
-  if (!newVisitorAppSelect || newVisitorAppSelect.disabled) return false;
-  const appId = newVisitorAppSelect.value || "";
-  if (!appId) {
-    setVisitorFormStatus("Choose an app first.");
+async function handleCreateUser() {
+  if (!newUserDefaultAppSelect || newUserDefaultAppSelect.disabled) return false;
+  const appIds = getSelectedNewUserAppIds();
+  if (appIds.length === 0) {
+    setUserFormStatus("Choose at least one app.");
     return false;
   }
-  const name = typeof newVisitorNameInput?.value === "string" ? newVisitorNameInput.value.trim() : "";
-  if (createVisitorBtn) createVisitorBtn.disabled = true;
-  setVisitorFormStatus("Creating visitor…");
+  const defaultAppId = newUserDefaultAppSelect.value || appIds[0];
+  const tool = preferredTool || selectedTool || toolsList[0]?.id || "";
+  if (!tool) {
+    setUserFormStatus("Choose a tool first.");
+    return false;
+  }
+  const name = typeof newUserNameInput?.value === "string" ? newUserNameInput.value.trim() : "";
+  if (createUserBtn) createUserBtn.disabled = true;
+  setUserFormStatus("Creating user…");
   try {
-    const visitor = await createVisitorRecord({
-      name: name || "New visitor",
-      appId,
+    const result = await createUserRecord({
+      name: name || "New user",
+      appIds,
+      defaultAppId,
+      folder: "~",
+      tool,
     });
-    if (newVisitorNameInput) {
-      newVisitorNameInput.value = "";
-      newVisitorNameInput.focus();
+    if (newUserNameInput) {
+      newUserNameInput.value = "";
+      newUserNameInput.focus();
     }
-    setVisitorFormStatus(`Created ${visitor?.name || "visitor"}.`);
+    renderUserAppOptions();
+    const user = result?.user;
+    if (user?.id) {
+      activeUserFilter = normalizeUserFilter(user.id);
+      persistActiveUserFilter(activeUserFilter);
+      activeSessionAppFilter = normalizeSessionAppFilter(user.defaultAppId || defaultAppId);
+      persistActiveSessionAppFilter(activeSessionAppFilter);
+      refreshAppCatalog();
+      renderSessionList();
+      if (typeof switchTab === "function") {
+        switchTab("sessions");
+      }
+      openSidebar();
+      const targetSession = result?.session || resolveRestoreTargetSession();
+      if (targetSession?.id) {
+        attachSession(targetSession.id, targetSession);
+      }
+    }
+    setUserFormStatus(`Created ${user?.name || "user"}.`);
     return true;
   } catch (error) {
-    setVisitorFormStatus(error?.message || "Failed to create visitor.");
+    setUserFormStatus(error?.message || "Failed to create user.");
     return false;
   } finally {
-    if (createVisitorBtn) createVisitorBtn.disabled = false;
+    if (createUserBtn) createUserBtn.disabled = false;
   }
+}
+
+function focusManagedUser(user, { open = true } = {}) {
+  if (!user?.id) return false;
+  activeUserFilter = normalizeUserFilter(user.id);
+  persistActiveUserFilter(activeUserFilter);
+  activeSessionAppFilter = normalizeSessionAppFilter(user.defaultAppId || FILTER_ALL_VALUE);
+  persistActiveSessionAppFilter(activeSessionAppFilter);
+  refreshAppCatalog();
+  renderSessionList();
+  if (typeof switchTab === "function") {
+    switchTab("sessions");
+  }
+  if (open) openSidebar();
+  const target = resolveRestoreTargetSession();
+  if (target?.id) {
+    attachSession(target.id, target);
+  }
+  return true;
+}
+
+function copyShareUrl(shareUrl, button) {
+  return (async () => {
+    try {
+      if (typeof copyText === "function") {
+        await copyText(shareUrl);
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        throw new Error("clipboard unavailable");
+      }
+      setTemporaryButtonText(button, "Copied");
+    } catch {
+      setTemporaryButtonText(button, "Copy failed");
+    }
+  })();
+}
+
+async function handleCreateApp() {
+  const name = typeof newAppNameInput?.value === "string" ? newAppNameInput.value.trim() : "";
+  const tool = typeof newAppToolSelect?.value === "string" ? newAppToolSelect.value.trim() : "";
+  if (!name) {
+    setAppFormStatus("Name is required.");
+    return false;
+  }
+  if (!tool) {
+    setAppFormStatus("Choose a tool first.");
+    return false;
+  }
+  if (createAppConfigBtn) createAppConfigBtn.disabled = true;
+  setAppFormStatus("Creating app…");
+  try {
+    const app = await createAppRecord({
+      name,
+      tool,
+      welcomeMessage: typeof newAppWelcomeInput?.value === "string" ? newAppWelcomeInput.value : "",
+      systemPrompt: typeof newAppSystemPromptInput?.value === "string" ? newAppSystemPromptInput.value : "",
+    });
+    if (newAppNameInput) newAppNameInput.value = "";
+    if (newAppWelcomeInput) newAppWelcomeInput.value = "";
+    if (newAppSystemPromptInput) newAppSystemPromptInput.value = "";
+    renderAppToolSelectOptions(newAppToolSelect);
+    activeSessionAppFilter = normalizeSessionAppFilter(app?.id || FILTER_ALL_VALUE);
+    persistActiveSessionAppFilter(activeSessionAppFilter);
+    refreshAppCatalog();
+    setAppFormStatus(`Created ${app?.name || "app"}.`);
+    return true;
+  } catch (error) {
+    setAppFormStatus(error?.message || "Failed to create app.");
+    return false;
+  } finally {
+    if (createAppConfigBtn) createAppConfigBtn.disabled = false;
+  }
+}
+
+function focusNewAppComposer() {
+  if (typeof switchTab === "function") {
+    switchTab("settings");
+  }
+  openSidebar();
+  if (typeof fetchAppsList === "function") {
+    void fetchAppsList().catch(() => {});
+  }
+  window.setTimeout(() => {
+    newAppNameInput?.focus();
+    newAppNameInput?.select?.();
+  }, 0);
+  return true;
 }
 
 function renderSettingsAppsPanel() {
@@ -1096,6 +1368,7 @@ function renderSettingsAppsPanel() {
     return;
   }
 
+  renderAppToolSelectOptions(newAppToolSelect);
   const apps = getOrderedSettingsApps();
   settingsAppsList.innerHTML = "";
   if (apps.length === 0) {
@@ -1109,15 +1382,12 @@ function renderSettingsAppsPanel() {
 
     const header = document.createElement("div");
     header.className = "settings-app-card-header";
-
     const name = document.createElement("div");
     name.className = "settings-app-name";
     name.textContent = app.name || "Untitled App";
-
     const kind = document.createElement("div");
     kind.className = "settings-app-kind";
     kind.textContent = getAppKindLabel(app);
-
     header.appendChild(name);
     header.appendChild(kind);
     card.appendChild(header);
@@ -1127,12 +1397,117 @@ function renderSettingsAppsPanel() {
     description.textContent = summarizeAppDescription(app);
     card.appendChild(description);
 
+    const meta = document.createElement("div");
+    meta.className = "settings-app-meta";
+    meta.textContent = `Default tool · ${(app.tool || preferredTool || selectedTool || "not set")}`;
+    card.appendChild(meta);
+
     const shareUrl = buildAppShareUrl(app);
     if (shareUrl) {
       const link = document.createElement("div");
       link.className = "settings-app-link";
       link.textContent = shareUrl;
       card.appendChild(link);
+    }
+
+    if (!app.builtin) {
+      const editor = document.createElement("div");
+      editor.className = "settings-app-editor";
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "settings-inline-input";
+      nameInput.type = "text";
+      nameInput.value = app.name || "";
+      editor.appendChild(nameInput);
+
+      const toolSelect = document.createElement("select");
+      toolSelect.className = "settings-inline-select";
+      renderAppToolSelectOptions(toolSelect, app.tool || "");
+      editor.appendChild(toolSelect);
+
+      const welcomeInput = document.createElement("textarea");
+      welcomeInput.className = "settings-inline-textarea";
+      welcomeInput.value = typeof app.welcomeMessage === "string" ? app.welcomeMessage : "";
+      welcomeInput.placeholder = "Optional first assistant message";
+      editor.appendChild(welcomeInput);
+
+      const systemPromptInput = document.createElement("textarea");
+      systemPromptInput.className = "settings-inline-textarea";
+      systemPromptInput.value = typeof app.systemPrompt === "string" ? app.systemPrompt : "";
+      systemPromptInput.placeholder = "Optional system prompt";
+      editor.appendChild(systemPromptInput);
+
+      const inlineStatus = document.createElement("div");
+      inlineStatus.className = "settings-app-empty inline-status";
+      inlineStatus.textContent = "Custom apps are editable here.";
+      editor.appendChild(inlineStatus);
+      card.appendChild(editor);
+
+      const actions = document.createElement("div");
+      actions.className = "settings-app-actions";
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "settings-app-btn";
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", async () => {
+        saveBtn.disabled = true;
+        inlineStatus.textContent = "Saving…";
+        try {
+          const updated = await updateAppRecord(app.id, {
+            name: nameInput.value,
+            tool: toolSelect.value,
+            welcomeMessage: welcomeInput.value,
+            systemPrompt: systemPromptInput.value,
+          });
+          inlineStatus.textContent = `Saved ${updated?.name || "app"}.`;
+        } catch (error) {
+          inlineStatus.textContent = error?.message || "Failed to save app.";
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+      actions.appendChild(saveBtn);
+
+      const openSessionBtn = document.createElement("button");
+      openSessionBtn.type = "button";
+      openSessionBtn.className = "settings-app-btn";
+      openSessionBtn.textContent = "Open Session";
+      openSessionBtn.addEventListener("click", () => {
+        createSessionForApp(app, { principal: getAdminSessionPrincipal() });
+      });
+      actions.appendChild(openSessionBtn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "settings-app-btn";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", async () => {
+        deleteBtn.disabled = true;
+        inlineStatus.textContent = "Deleting…";
+        try {
+          await deleteAppRecord(app.id);
+        } catch (error) {
+          deleteBtn.disabled = false;
+          inlineStatus.textContent = error?.message || "Failed to delete app.";
+        }
+      });
+      actions.appendChild(deleteBtn);
+
+      if (shareUrl) {
+        const copyLinkBtn = document.createElement("button");
+        copyLinkBtn.type = "button";
+        copyLinkBtn.className = "settings-app-btn";
+        copyLinkBtn.textContent = "Copy Link";
+        copyLinkBtn.addEventListener("click", () => {
+          void copyShareUrl(shareUrl, copyLinkBtn);
+        });
+        actions.appendChild(copyLinkBtn);
+      }
+
+      card.appendChild(actions);
+      settingsAppsList.appendChild(card);
+      continue;
     }
 
     const actions = document.createElement("div");
@@ -1143,7 +1518,7 @@ function renderSettingsAppsPanel() {
     openSessionBtn.className = "settings-app-btn";
     openSessionBtn.textContent = "Open Session";
     openSessionBtn.addEventListener("click", () => {
-      createSessionForApp(app);
+      createSessionForApp(app, { principal: getAdminSessionPrincipal() });
     });
     actions.appendChild(openSessionBtn);
 
@@ -1152,19 +1527,8 @@ function renderSettingsAppsPanel() {
       copyLinkBtn.type = "button";
       copyLinkBtn.className = "settings-app-btn";
       copyLinkBtn.textContent = "Copy Link";
-      copyLinkBtn.addEventListener("click", async () => {
-        try {
-          if (typeof copyText === "function") {
-            await copyText(shareUrl);
-          } else if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(shareUrl);
-          } else {
-            throw new Error("clipboard unavailable");
-          }
-          setTemporaryButtonText(copyLinkBtn, "Copied");
-        } catch {
-          setTemporaryButtonText(copyLinkBtn, "Copy failed");
-        }
+      copyLinkBtn.addEventListener("click", () => {
+        void copyShareUrl(shareUrl, copyLinkBtn);
       });
       actions.appendChild(copyLinkBtn);
 
@@ -1183,133 +1547,210 @@ function renderSettingsAppsPanel() {
   }
 }
 
-function renderSettingsVisitorsPanel() {
-  if (!settingsVisitorsList) return;
+function renderSettingsUsersPanel() {
+  if (!settingsUsersList) return;
   if (visitorMode) {
-    settingsVisitorsList.innerHTML = '<div class="settings-app-empty">Visitors are only available to the owner.</div>';
+    settingsUsersList.innerHTML = '<div class="settings-app-empty">Users are only available to the owner.</div>';
     return;
   }
 
-  settingsVisitorsList.innerHTML = "";
-  const visitors = Array.isArray(availableVisitors) ? availableVisitors : [];
-  if (visitors.length === 0) {
-    settingsVisitorsList.innerHTML = '<div class="settings-app-empty">No visitors yet. Create one above to get a dedicated link.</div>';
+  settingsUsersList.innerHTML = "";
+  const users = Array.isArray(availableUsers) ? availableUsers : [];
+  if (users.length === 0) {
+    settingsUsersList.innerHTML = '<div class="settings-app-empty">No extra users yet. Admin stays the default view.</div>';
     return;
   }
 
-  for (const visitor of visitors) {
+  const allApps = getOrderedSettingsApps();
+  for (const user of users) {
     const card = document.createElement("div");
     card.className = "settings-app-card";
 
     const header = document.createElement("div");
     header.className = "settings-app-card-header";
-
     const name = document.createElement("div");
     name.className = "settings-app-name";
-    name.textContent = visitor.name || "Unnamed visitor";
-
-    const app = getShareableAppCatalogEntry(visitor.appId);
+    name.textContent = user.name || "Unnamed user";
     const kind = document.createElement("div");
     kind.className = "settings-app-kind";
-    kind.textContent = app?.name ? `App · ${app.name}` : "Visitor";
-
+    const allowedApps = allApps.filter((app) => Array.isArray(user.appIds) && user.appIds.includes(app.id));
+    const defaultApp = allowedApps.find((app) => app.id === user.defaultAppId) || allowedApps[0] || null;
+    kind.textContent = `${allowedApps.length} app${allowedApps.length === 1 ? "" : "s"} · default ${defaultApp?.name || "Basic Chat"}`;
     header.appendChild(name);
     header.appendChild(kind);
     card.appendChild(header);
 
     const description = document.createElement("div");
     description.className = "settings-app-description";
-    description.textContent = app?.name
-      ? `This link opens ${app.name} for ${visitor.name || "this visitor"}.`
-      : "This visitor link is assigned to a shareable app.";
+    description.textContent = allowedApps.length > 0
+      ? `Allowed apps: ${allowedApps.map((app) => app.name || app.id).join(", ")}`
+      : "No apps selected yet.";
     card.appendChild(description);
 
-    const shareUrl = buildVisitorShareUrl(visitor);
-    if (shareUrl) {
-      const link = document.createElement("div");
-      link.className = "settings-app-link";
-      link.textContent = shareUrl;
-      card.appendChild(link);
+    const editor = document.createElement("div");
+    editor.className = "settings-app-editor";
+
+    const nameInput = document.createElement("input");
+    nameInput.className = "settings-inline-input";
+    nameInput.type = "text";
+    nameInput.value = user.name || "";
+    editor.appendChild(nameInput);
+
+    const pickerLabel = document.createElement("div");
+    pickerLabel.className = "settings-app-kind";
+    pickerLabel.textContent = "Allowed apps";
+    editor.appendChild(pickerLabel);
+
+    const chipGrid = document.createElement("div");
+    chipGrid.className = "settings-app-picker-grid";
+    for (const app of allApps) {
+      const chip = document.createElement("label");
+      chip.className = "settings-app-chip";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = app.id;
+      checkbox.checked = Array.isArray(user.appIds) && user.appIds.includes(app.id);
+      const text = document.createElement("span");
+      text.textContent = app.name || app.id;
+      chip.appendChild(checkbox);
+      chip.appendChild(text);
+      chipGrid.appendChild(chip);
     }
+    editor.appendChild(chipGrid);
+
+    const defaultSelect = document.createElement("select");
+    defaultSelect.className = "settings-inline-select";
+    const syncDefaultOptions = () => {
+      const selectedAppIds = [...chipGrid.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+      const selectedApps = allApps.filter((app) => selectedAppIds.includes(app.id));
+      defaultSelect.innerHTML = "";
+      if (selectedApps.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Choose at least one app";
+        defaultSelect.appendChild(option);
+        defaultSelect.disabled = true;
+        return;
+      }
+      defaultSelect.disabled = false;
+      for (const app of selectedApps) {
+        const option = document.createElement("option");
+        option.value = app.id;
+        option.textContent = app.name || app.id;
+        defaultSelect.appendChild(option);
+      }
+      const fallbackValue = selectedApps.some((app) => app.id === user.defaultAppId)
+        ? user.defaultAppId
+        : selectedApps[0].id;
+      defaultSelect.value = fallbackValue;
+    };
+    chipGrid.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.addEventListener("change", syncDefaultOptions);
+    });
+    syncDefaultOptions();
+    editor.appendChild(defaultSelect);
+
+    const inlineStatus = document.createElement("div");
+    inlineStatus.className = "settings-app-empty inline-status";
+    inlineStatus.textContent = "Each user can keep multiple apps, but starts from one default app.";
+    editor.appendChild(inlineStatus);
+    card.appendChild(editor);
 
     const actions = document.createElement("div");
     actions.className = "settings-app-actions";
 
-    if (shareUrl) {
-      const copyLinkBtn = document.createElement("button");
-      copyLinkBtn.type = "button";
-      copyLinkBtn.className = "settings-app-btn";
-      copyLinkBtn.textContent = "Copy Link";
-      copyLinkBtn.addEventListener("click", async () => {
-        try {
-          if (typeof copyText === "function") {
-            await copyText(shareUrl);
-          } else if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(shareUrl);
-          } else {
-            throw new Error("clipboard unavailable");
-          }
-          setTemporaryButtonText(copyLinkBtn, "Copied");
-        } catch {
-          setTemporaryButtonText(copyLinkBtn, "Copy failed");
-        }
-      });
-      actions.appendChild(copyLinkBtn);
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "settings-app-btn";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", async () => {
+      const appIds = [...chipGrid.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+      if (appIds.length === 0) {
+        inlineStatus.textContent = "Choose at least one app.";
+        return;
+      }
+      saveBtn.disabled = true;
+      inlineStatus.textContent = "Saving…";
+      try {
+        const updated = await updateUserRecord(user.id, {
+          name: nameInput.value,
+          appIds,
+          defaultAppId: defaultSelect.value || appIds[0],
+        });
+        inlineStatus.textContent = `Saved ${updated?.name || "user"}.`;
+      } catch (error) {
+        inlineStatus.textContent = error?.message || "Failed to save user.";
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+    actions.appendChild(saveBtn);
 
-      const openLinkBtn = document.createElement("button");
-      openLinkBtn.type = "button";
-      openLinkBtn.className = "settings-app-btn";
-      openLinkBtn.textContent = "Open Link";
-      openLinkBtn.addEventListener("click", () => {
-        window.open(shareUrl, "_blank", "noopener,noreferrer");
-      });
-      actions.appendChild(openLinkBtn);
-    }
+    const focusBtn = document.createElement("button");
+    focusBtn.type = "button";
+    focusBtn.className = "settings-app-btn";
+    focusBtn.textContent = "Focus Sessions";
+    focusBtn.addEventListener("click", () => {
+      focusManagedUser(user);
+    });
+    actions.appendChild(focusBtn);
+
+    const newSessionBtn = document.createElement("button");
+    newSessionBtn.type = "button";
+    newSessionBtn.className = "settings-app-btn";
+    newSessionBtn.textContent = "New Session";
+    newSessionBtn.addEventListener("click", () => {
+      const principal = getPrincipalForUser(user);
+      const appId = resolveAppIdForPrincipal(principal, user.defaultAppId || activeSessionAppFilter);
+      const app = getAppRecordById(appId);
+      if (app) {
+        activeUserFilter = normalizeUserFilter(user.id);
+        persistActiveUserFilter(activeUserFilter);
+        activeSessionAppFilter = normalizeSessionAppFilter(app.id);
+        persistActiveSessionAppFilter(activeSessionAppFilter);
+        refreshAppCatalog();
+        createSessionForApp(app, { principal });
+      }
+    });
+    actions.appendChild(newSessionBtn);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "settings-app-btn";
     deleteBtn.textContent = "Delete";
     deleteBtn.addEventListener("click", async () => {
+      deleteBtn.disabled = true;
+      inlineStatus.textContent = "Deleting…";
       try {
-        await deleteVisitorRecord(visitor.id);
+        await deleteUserRecord(user.id);
+        if (activeUserFilter === user.id) {
+          activeUserFilter = ADMIN_USER_FILTER_VALUE;
+          persistActiveUserFilter(activeUserFilter);
+          refreshAppCatalog();
+          renderSessionList();
+        }
       } catch (error) {
-        console.warn("[visitors] Failed to delete visitor:", error?.message || error);
+        deleteBtn.disabled = false;
+        inlineStatus.textContent = error?.message || "Failed to delete user.";
       }
     });
     actions.appendChild(deleteBtn);
 
     card.appendChild(actions);
-    settingsVisitorsList.appendChild(card);
+    settingsUsersList.appendChild(card);
   }
 }
 
 function createNewSessionShortcut({ closeSidebar = true } = {}) {
-  if (closeSidebar && !isDesktop) closeSidebarFn();
-  const tool = preferredTool || selectedTool || toolsList[0]?.id;
-  if (!tool) return false;
-  return dispatchAction({
-    action: "create",
-    folder: "~",
-    tool,
-    sourceId: DEFAULT_APP_ID,
-    sourceName: DEFAULT_APP_NAME,
-    appId: BASIC_CHAT_TEMPLATE_APP_ID,
-  });
+  const principal = resolveSelectedSessionPrincipal();
+  const appId = resolveAppIdForPrincipal(principal, activeSessionAppFilter);
+  const app = getAppRecordById(appId);
+  if (!app) return false;
+  return createSessionForApp(app, { closeSidebar, principal });
 }
 
-function createNewAppShortcut({ closeSidebar = true } = {}) {
-  if (closeSidebar && !isDesktop) closeSidebarFn();
-  const tool = preferredTool || selectedTool || toolsList[0]?.id;
-  if (!tool) return false;
-  return dispatchAction({
-    action: "create",
-    folder: "~",
-    tool,
-    sourceId: DEFAULT_APP_ID,
-    sourceName: DEFAULT_APP_NAME,
-    appId: CREATE_APP_TEMPLATE_APP_ID,
-  });
+function createNewAppShortcut() {
+  return focusNewAppComposer();
 }
 
 menuBtn.addEventListener("click", openSidebar);
@@ -1327,14 +1768,18 @@ newSessionBtn.addEventListener("click", () => {
   createNewSessionShortcut();
 });
 
-createVisitorBtn?.addEventListener("click", () => {
-  void handleCreateVisitor();
+createUserBtn?.addEventListener("click", () => {
+  void handleCreateUser();
 });
 
-newVisitorNameInput?.addEventListener("keydown", (event) => {
+newUserNameInput?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
-  void handleCreateVisitor();
+  void handleCreateUser();
+});
+
+createAppConfigBtn?.addEventListener("click", () => {
+  void handleCreateApp();
 });
 
 // ---- Image handling ----
