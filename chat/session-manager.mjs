@@ -134,11 +134,23 @@ const VISITOR_TURN_GUARDRAIL = [
 const INTERNAL_SESSION_ROLE_CONTEXT_COMPACTOR = 'context_compactor';
 const AUTO_COMPACT_MARKER_TEXT = 'Older messages above this marker are no longer in the model\'s live context. They remain visible in the transcript, but only the compressed handoff and newer messages below are loaded for continued work.';
 
-const AUTO_BOARD_UPDATES_ENABLED = /^(1|true|yes|on)$/i.test(
-  process.env.REMOTELAB_BOARD_AUTO_UPDATES ||
-  process.env.REMOTELAB_BOARD_AUTO_UPDATE ||
-  process.env.REMOTELAB_AUTO_BOARD_UPDATES ||
-  '',
+function parseBoardAutoUpdatesEnv(value) {
+  if (value === undefined || value === '') {
+    return true;
+  }
+  if (/^(0|false|no|off)$/i.test(value)) {
+    return false;
+  }
+  if (/^(1|true|yes|on|enabled)$/i.test(value)) {
+    return true;
+  }
+  return true;
+}
+
+const AUTO_BOARD_UPDATES_ENABLED = parseBoardAutoUpdatesEnv(
+  process.env.REMOTELAB_BOARD_AUTO_UPDATES
+  || process.env.REMOTELAB_BOARD_AUTO_UPDATE
+  || process.env.REMOTELAB_AUTO_BOARD_UPDATES,
 );
 const CONTEXT_COMPACTOR_SYSTEM_PROMPT = [
   'You are RemoteLab\'s hidden context compactor for a user-facing session.',
