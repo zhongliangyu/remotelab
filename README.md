@@ -53,7 +53,7 @@ The important architectural assumptions are:
 
 ### Get set up in 5 minutes — hand it to an AI
 
-The fastest path is still to paste a setup prompt into CodeX, Claude Code, or another capable coding agent on the machine that will host RemoteLab. It can handle almost everything automatically and stop only for truly manual steps such as Cloudflare login.
+The fastest path is still to paste a setup prompt into CodeX, Claude Code, or another capable coding agent on the machine that will host RemoteLab. It can handle almost everything automatically and stop only for truly manual steps such as Cloudflare login when that mode is in play.
 
 Configuration and feature-rollout docs in this repo are model-first and prompt-first: the human copies a prompt into their own AI coding agent, the agent gathers the needed context up front in as few rounds as possible, and the rest of the work stays inside that conversation except for explicit `[HUMAN]` steps.
 
@@ -63,15 +63,23 @@ The best pattern is one early handoff: the agent asks for everything it needs in
 - **macOS**: Homebrew installed + Node.js 18+
 - **Linux**: Node.js 18+
 - At least one AI tool installed (`codex`, `claude`, `cline`, or a compatible local tool)
-- A domain pointed at Cloudflare ([free account](https://cloudflare.com), domain ~$1–12/yr from Namecheap or Porkbun)
+- **Network** (pick one):
+  - **Cloudflare Tunnel**: a domain pointed at Cloudflare ([free account](https://cloudflare.com), domain ~$1–12/yr from Namecheap or Porkbun)
+  - **Tailscale**: [free for personal use](https://tailscale.com) — install on both phone and dev machine, join the same tailnet, no domain needed
 
 **Copy this prompt into CodeX or another coding agent:**
 
 ```text
 I want to set up RemoteLab on this machine so I can control AI coding tools from my phone.
 
+Network mode: [cloudflare | tailscale]
+
+# For Cloudflare mode:
 My domain: [YOUR_DOMAIN]
 Subdomain I want to use: [SUBDOMAIN]
+
+# For Tailscale mode:
+(No extra config needed — both phone and dev machine are on the same tailnet.)
 
 Please follow the full setup guide at docs/setup.md in this repository.
 Keep the workflow inside this chat.
@@ -85,7 +93,9 @@ If you want the full setup contract and the human-only checkpoints, use `docs/se
 
 ### What you'll have when done
 
-Open `https://[subdomain].[domain]/?token=YOUR_TOKEN` on your phone:
+Open your RemoteLab URL on your phone:
+- **Cloudflare**: `https://[subdomain].[domain]/?token=YOUR_TOKEN`
+- **Tailscale**: `http://[hostname].[tailnet].ts.net:7690/?token=YOUR_TOKEN`
 
 ![Dashboard](docs/new-dashboard.png)
 
@@ -128,13 +138,13 @@ RemoteLab’s shipped architecture is now centered on a stable chat control plan
 | `chat-server.mjs` | `7690` | Primary chat/control plane for production use |
 
 ```
-Phone Browser
-   │
-   ▼
-Cloudflare Tunnel
-   │
-   ▼
-chat-server.mjs (:7690)
+Phone Browser                          Phone Browser
+   │                                      │
+   ▼                                      ▼
+Cloudflare Tunnel                    Tailscale (VPN)
+   │                                      │
+   ▼                                      ▼
+chat-server.mjs (:7690)             chat-server.mjs (:7690)
    │
    ├── HTTP control plane
    ├── auth + policy
@@ -176,9 +186,9 @@ remotelab --help               Show help
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CHAT_PORT` | `7690` | Chat server port |
-| `CHAT_BIND_HOST` | `127.0.0.1` | Host to bind the chat server (`127.0.0.1` for local only, `0.0.0.0` for LAN access) |
+| `CHAT_BIND_HOST` | `127.0.0.1` | Host to bind the chat server (`127.0.0.1` for Cloudflare/local only, `0.0.0.0` for Tailscale or LAN access) |
 | `SESSION_EXPIRY` | `86400000` | Cookie lifetime in ms (24h) |
-| `SECURE_COOKIES` | `1` | Set `0` only for local HTTP debugging |
+| `SECURE_COOKIES` | `1` | Set `0` for Tailscale or local HTTP access (no HTTPS) |
 | `REMOTELAB_LIVE_CONTEXT_COMPACT_TOKENS` | `window overflow` | Optional auto-compact override in live-context tokens; unset = compact only after live context exceeds 100% of a known context window, `Inf` = disable |
 
 ## Common file locations
@@ -209,10 +219,11 @@ remotelab --help               Show help
 
 ## Security
 
-- HTTPS via Cloudflare (TLS at the edge, localhost HTTP on the machine)
+- **Cloudflare mode**: HTTPS via Cloudflare (TLS at the edge, localhost HTTP on the machine); services bind to `127.0.0.1` only
+- **Tailscale mode**: traffic encrypted by Tailscale's WireGuard mesh; services bind to `0.0.0.0` (all interfaces), so the port is also reachable from LAN/WAN — on untrusted networks, configure a firewall to restrict port `7690` to the Tailscale subnet (e.g. `100.64.0.0/10`)
 - `256`-bit random access token with timing-safe comparison
 - optional scrypt-hashed password login
-- `HttpOnly` + `Secure` + `SameSite=Strict` auth cookies
+- `HttpOnly` + `Secure` + `SameSite=Strict` auth cookies (`Secure` disabled in Tailscale mode)
 - per-IP rate limiting with exponential backoff on failed login
 - default: services bind to `127.0.0.1` only — no direct external exposure; set `CHAT_BIND_HOST=0.0.0.0` for LAN access
 - share snapshots are read-only and isolated from the owner chat surface
