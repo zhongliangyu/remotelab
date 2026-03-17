@@ -1,0 +1,148 @@
+const HIDDEN_EVENT_TYPES = new Set(['reasoning', 'tool_use', 'tool_result', 'file_change']);
+
+function cloneJson(value) {
+  if (value === null || value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isIgnoredStatusEvent(event) {
+  if (event?.type !== 'status') return false;
+  const content = typeof event.content === 'string' ? event.content.trim().toLowerCase() : '';
+  return content === 'thinking' || content === 'completed';
+}
+
+function isHiddenEvent(event) {
+  return HIDDEN_EVENT_TYPES.has(event?.type);
+}
+
+function isVisibleEvent(event) {
+  if (!event || typeof event !== 'object') return false;
+  if (event.type === 'message') return true;
+  if (event.type === 'context_barrier' || event.type === 'usage') return true;
+  if (event.type === 'status') return !isIgnoredStatusEvent(event) && !!String(event.content || '').trim();
+  return false;
+}
+
+function stripDeferredBodyFields(event) {
+  const next = cloneJson(event);
+  if (!next || typeof next !== 'object') return next;
+  delete next.bodyRef;
+  delete next.bodyField;
+  delete next.bodyAvailable;
+  delete next.bodyLoaded;
+  delete next.bodyPreview;
+  delete next.bodyBytes;
+  return next;
+}
+
+function collectToolNames(events = []) {
+  const names = [];
+  const seen = new Set();
+  for (const event of events) {
+    const toolName = typeof event?.toolName === 'string' ? event.toolName.trim() : '';
+    if (!toolName || seen.has(toolName)) continue;
+    seen.add(toolName);
+    names.push(toolName);
+  }
+  return names;
+}
+
+function buildCollapsedBlockLabel(hiddenEvents, state = 'completed') {
+  const toolNames = collectToolNames(hiddenEvents);
+  if (state === 'running') {
+    if (toolNames.length > 0) {
+      return `Thinking… · using ${toolNames.join(', ')}`;
+    }
+    return 'Thinking…';
+  }
+  if (toolNames.length > 0) {
+    return `Earlier reasoning & tool steps · used ${toolNames.join(', ')}`;
+  }
+  return 'Earlier reasoning & tool steps';
+}
+
+function buildCollapsedBlockEvent(hiddenEvents, state = 'completed') {
+  const first = hiddenEvents[0] || null;
+  const last = hiddenEvents[hiddenEvents.length - 1] || first;
+  const toolNames = collectToolNames(hiddenEvents);
+  return {
+    type: state === 'running' ? 'thinking_block' : 'collapsed_block',
+    seq: Number.isInteger(first?.seq) ? first.seq : 0,
+    blockStartSeq: Number.isInteger(first?.seq) ? first.seq : 0,
+    blockEndSeq: Number.isInteger(last?.seq) ? last.seq : 0,
+    state,
+    label: buildCollapsedBlockLabel(hiddenEvents, state),
+    hiddenEventCount: hiddenEvents.length,
+    ...(toolNames.length > 0 ? { toolNames } : {}),
+  };
+}
+
+function pushVisibleEvent(target, event) {
+  if (!isVisibleEvent(event)) return;
+  target.push(stripDeferredBodyFields(event));
+}
+
+function flushTurnInto(target, turn, { sessionRunning = false } = {}) {
+  if (!turn?.user) return;
+  target.push(stripDeferredBodyFields(turn.user));
+
+  const bodyEvents = Array.isArray(turn.body) ? turn.body : [];
+  const hiddenSegment = [];
+
+  for (const event of bodyEvents) {
+    if (isHiddenEvent(event)) {
+      hiddenSegment.push(event);
+      continue;
+    }
+
+    if (isIgnoredStatusEvent(event)) {
+      continue;
+    }
+
+    if (hiddenSegment.length > 0) {
+      target.push(buildCollapsedBlockEvent(hiddenSegment.splice(0), 'completed'));
+    }
+
+    pushVisibleEvent(target, event);
+  }
+
+  if (hiddenSegment.length > 0) {
+    target.push(buildCollapsedBlockEvent(hiddenSegment, sessionRunning ? 'running' : 'completed'));
+  }
+}
+
+export function buildSessionDisplayEvents(history = [], options = {}) {
+  const displayEvents = [];
+  let currentTurn = null;
+
+  for (const event of Array.isArray(history) ? history : []) {
+    if (event?.type === 'message' && event.role === 'user') {
+      flushTurnInto(displayEvents, currentTurn, { sessionRunning: false });
+      currentTurn = {
+        user: event,
+        body: [],
+      };
+      continue;
+    }
+
+    if (currentTurn) {
+      currentTurn.body.push(event);
+      continue;
+    }
+
+    pushVisibleEvent(displayEvents, event);
+  }
+
+  flushTurnInto(displayEvents, currentTurn, options);
+  return displayEvents;
+}
+
+export function buildEventBlockEvents(history = [], startSeq = 0, endSeq = 0) {
+  if (!Number.isInteger(startSeq) || !Number.isInteger(endSeq) || startSeq < 1 || endSeq < startSeq) {
+    return [];
+  }
+  return (Array.isArray(history) ? history : [])
+    .filter((event) => Number.isInteger(event?.seq) && event.seq >= startSeq && event.seq <= endSeq)
+    .filter((event) => isHiddenEvent(event))
+    .map(stripDeferredBodyFields);
+}

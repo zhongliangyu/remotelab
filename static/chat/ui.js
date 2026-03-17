@@ -187,12 +187,7 @@ function renderMessage(evt) {
   }
 }
 
-function renderToolUse(evt) {
-  const container = getThinkingBody();
-  if (currentThinkingBlock && evt.toolName) {
-    currentThinkingBlock.tools.add(evt.toolName);
-  }
-
+function createToolCard(evt) {
   const card = document.createElement("div");
   card.className = "tool-card";
 
@@ -224,49 +219,58 @@ function renderToolUse(evt) {
   card.appendChild(header);
   card.appendChild(body);
   card.dataset.toolId = evt.id;
+  return { card, body };
+}
+
+function findLatestPendingToolCard(root) {
+  const cards = root?.querySelectorAll?.(".tool-card") || [];
+  for (let index = cards.length - 1; index >= 0; index -= 1) {
+    if (!cards[index].querySelector(".tool-result")) {
+      return cards[index];
+    }
+  }
+  return null;
+}
+
+function renderToolUseInto(container, evt, { toolTracker = null } = {}) {
+  if (!container) return null;
+  if (toolTracker && evt.toolName) {
+    toolTracker.add(evt.toolName);
+  }
+  const { card } = createToolCard(evt);
   container.appendChild(card);
+  return card;
 }
 
-function renderToolResult(evt) {
-  // Search in current thinking block body, or fall back to messagesInner
-  const searchRoot =
-    inThinkingBlock && currentThinkingBlock
-      ? currentThinkingBlock.body
-      : messagesInner;
+function renderToolResultInto(container, evt) {
+  const targetCard = findLatestPendingToolCard(container);
+  if (!targetCard) return null;
 
-  const cards = searchRoot.querySelectorAll(".tool-card");
-  let targetCard = null;
-  for (let i = cards.length - 1; i >= 0; i--) {
-    if (!cards[i].querySelector(".tool-result")) {
-      targetCard = cards[i];
-      break;
-    }
-  }
+  const body = targetCard.querySelector(".tool-body");
+  if (!body) return null;
 
-  if (targetCard) {
-    const body = targetCard.querySelector(".tool-body");
-    const label = document.createElement("div");
-    label.className = "tool-result-label";
-    label.innerHTML =
-      "Result" +
-      (evt.exitCode !== undefined
-        ? `<span class="exit-code ${evt.exitCode === 0 ? "ok" : "fail"}">${evt.exitCode === 0 ? "exit 0" : "exit " + evt.exitCode}</span>`
-        : "");
-    const pre = document.createElement("pre");
-    pre.className = "tool-result";
-    pre.textContent = evt.output || (evt.bodyAvailable ? "Load result…" : "");
-    if (evt.bodyAvailable && !evt.bodyLoaded) {
-      pre.dataset.eventSeq = String(evt.seq || "");
-      pre.dataset.bodyPending = "true";
-      pre.dataset.preview = evt.output || "";
-    }
-    body.appendChild(label);
-    body.appendChild(pre);
+  const label = document.createElement("div");
+  label.className = "tool-result-label";
+  label.innerHTML =
+    "Result" +
+    (evt.exitCode !== undefined
+      ? `<span class="exit-code ${evt.exitCode === 0 ? "ok" : "fail"}">${evt.exitCode === 0 ? "exit 0" : "exit " + evt.exitCode}</span>`
+      : "");
+  const pre = document.createElement("pre");
+  pre.className = "tool-result";
+  pre.textContent = evt.output || (evt.bodyAvailable ? "Load result…" : "");
+  if (evt.bodyAvailable && !evt.bodyLoaded) {
+    pre.dataset.eventSeq = String(evt.seq || "");
+    pre.dataset.bodyPending = "true";
+    pre.dataset.preview = evt.output || "";
   }
+  body.appendChild(label);
+  body.appendChild(pre);
+  return targetCard;
 }
 
-function renderFileChange(evt) {
-  const container = getThinkingBody();
+function renderFileChangeInto(container, evt) {
+  if (!container) return null;
   const div = document.createElement("div");
   div.className = "file-card";
   const kind = evt.changeType || "edit";
@@ -278,10 +282,11 @@ function renderFileChange(evt) {
     <span class="change-type ${kind}">${kind}</span>`;
   enhanceRenderedContentLinks(div);
   container.appendChild(div);
+  return div;
 }
 
-function renderReasoning(evt) {
-  const container = getThinkingBody();
+function renderReasoningInto(container, evt) {
+  if (!container) return null;
   const div = document.createElement("div");
   div.className = "reasoning";
   div.textContent = evt.content || (evt.bodyAvailable ? "Load thinking…" : "");
@@ -291,6 +296,182 @@ function renderReasoning(evt) {
     div.dataset.preview = evt.content || "";
   }
   container.appendChild(div);
+  return div;
+}
+
+function collectHiddenBlockToolNames(events) {
+  const names = [];
+  const seen = new Set();
+  for (const event of Array.isArray(events) ? events : []) {
+    const name = typeof event?.toolName === "string" ? event.toolName.trim() : "";
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+function buildLoadedHiddenBlockLabel(events) {
+  const toolNames = collectHiddenBlockToolNames(events);
+  if (toolNames.length > 0) {
+    return `Thought · used ${toolNames.join(", ")}`;
+  }
+  return "Thought";
+}
+
+function createDeferredThinkingBlock(label, { collapsed = true } = {}) {
+  const block = document.createElement("div");
+  block.className = `thinking-block${collapsed ? " collapsed" : ""}`;
+
+  const header = document.createElement("div");
+  header.className = "thinking-header";
+  header.innerHTML = `${renderUiIcon("gear", "thinking-icon")}
+    <span class="thinking-label">${esc(label || "Thinking…")}</span>
+    <span class="thinking-chevron">${renderUiIcon("chevron-down")}</span>`;
+
+  const body = document.createElement("div");
+  body.className = "thinking-body";
+
+  block.appendChild(header);
+  block.appendChild(body);
+  return {
+    block,
+    header,
+    body,
+    label: header.querySelector(".thinking-label"),
+  };
+}
+
+function createHiddenBlockStatusNode(text) {
+  const div = document.createElement("div");
+  div.className = "reasoning";
+  div.textContent = text;
+  return div;
+}
+
+function renderHiddenBlockEventsInto(container, events) {
+  if (!container) return;
+  for (const event of Array.isArray(events) ? events : []) {
+    switch (event?.type) {
+      case "reasoning":
+        renderReasoningInto(container, event);
+        break;
+      case "tool_use":
+        renderToolUseInto(container, event);
+        break;
+      case "tool_result":
+        renderToolResultInto(container, event);
+        break;
+      case "file_change":
+        renderFileChangeInto(container, event);
+        break;
+    }
+  }
+}
+
+async function ensureEventBlockLoaded(sessionId, body, evt, { nestedThinkingBlock = false } = {}) {
+  if (!body || !evt) return;
+  const loadState = body.dataset.blockLoaded || "idle";
+  if (loadState === "loaded" || loadState === "loading") return;
+
+  body.dataset.blockLoaded = "loading";
+  body.innerHTML = "";
+  body.appendChild(createHiddenBlockStatusNode("Loading hidden steps…"));
+
+  try {
+    const data = await fetchEventBlock(sessionId, evt.blockStartSeq, evt.blockEndSeq);
+    const hiddenEvents = Array.isArray(data?.events) ? data.events : [];
+    body.innerHTML = "";
+    if (nestedThinkingBlock) {
+      const thinking = createDeferredThinkingBlock(buildLoadedHiddenBlockLabel(hiddenEvents), {
+        collapsed: false,
+      });
+      thinking.header.addEventListener("click", () => {
+        thinking.block.classList.toggle("collapsed");
+      });
+      body.appendChild(thinking.block);
+      renderHiddenBlockEventsInto(thinking.body, hiddenEvents);
+    } else {
+      renderHiddenBlockEventsInto(body, hiddenEvents);
+    }
+    body.dataset.blockLoaded = "loaded";
+  } catch (error) {
+    console.warn("[event-block] Failed to load hidden block:", error.message);
+    body.innerHTML = "";
+    body.appendChild(createHiddenBlockStatusNode("Failed to load hidden steps."));
+    body.dataset.blockLoaded = "idle";
+  }
+}
+
+function renderCollapsedBlock(evt) {
+  if (inThinkingBlock) {
+    finalizeThinkingBlock();
+  }
+
+  const sessionId = currentSessionId;
+  const drawer = document.createElement("details");
+  drawer.className = "turn-collapse-drawer";
+
+  const summary = document.createElement("summary");
+  summary.className = "turn-collapse-summary";
+  summary.textContent = evt.label || "Earlier reasoning & tool steps";
+
+  const body = document.createElement("div");
+  body.className = "turn-collapse-body";
+  body.dataset.blockLoaded = "idle";
+
+  drawer.appendChild(summary);
+  drawer.appendChild(body);
+  drawer.addEventListener("toggle", () => {
+    if (!drawer.open) return;
+    ensureEventBlockLoaded(sessionId, body, evt, { nestedThinkingBlock: true }).catch(() => {});
+  });
+  messagesInner.appendChild(drawer);
+}
+
+function renderThinkingBlockEvent(evt) {
+  if (inThinkingBlock) {
+    finalizeThinkingBlock();
+  }
+
+  const sessionId = currentSessionId;
+  const thinking = createDeferredThinkingBlock(evt.label || "Thinking…", {
+    collapsed: true,
+  });
+  thinking.body.dataset.blockLoaded = "idle";
+
+  thinking.header.addEventListener("click", () => {
+    thinking.block.classList.toggle("collapsed");
+    if (thinking.block.classList.contains("collapsed")) return;
+    ensureEventBlockLoaded(sessionId, thinking.body, evt).catch(() => {});
+  });
+
+  messagesInner.appendChild(thinking.block);
+}
+
+function renderToolUse(evt) {
+  const container = getThinkingBody();
+  renderToolUseInto(container, evt, {
+    toolTracker: currentThinkingBlock?.tools || null,
+  });
+}
+
+function renderToolResult(evt) {
+  const searchRoot =
+    inThinkingBlock && currentThinkingBlock
+      ? currentThinkingBlock.body
+      : messagesInner;
+  renderToolResultInto(searchRoot, evt);
+}
+
+function renderFileChange(evt) {
+  const container = getThinkingBody();
+  renderFileChangeInto(container, evt);
+}
+
+function renderReasoning(evt) {
+  const container = getThinkingBody();
+  renderReasoningInto(container, evt);
 }
 
 function renderStatusMsg(evt) {

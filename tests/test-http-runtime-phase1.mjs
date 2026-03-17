@@ -555,34 +555,54 @@ async function phase10EventIndexContract() {
   const port = randomPort();
   const server = await startServer({ home, port });
   try {
-    const session = await createSession(port, { name: 'Event index', group: 'Tests', description: 'Full history + lazy bodies' });
+    const session = await createSession(port, { name: 'Event index', group: 'Tests', description: 'Display timeline + lazy hidden blocks' });
     const submit = await submitMessage(port, session.id, 'req-index-contract');
     await waitForRunTerminal(port, submit.json.run.id);
 
     const events = await request(port, 'GET', `/api/sessions/${session.id}/events?afterSeq=0&limit=1`);
     assert.equal(events.status, 200, 'event history should load successfully');
     assert.ok(Array.isArray(events.json.events), 'event history should return an events array');
-    assert.ok(events.json.events.length > 1, 'event history should ignore limit pagination and return the full event index');
+    assert.ok(events.json.events.length >= 3, 'event history should ignore limit pagination and return the full display timeline');
+    assert.equal(
+      events.json.events.some((event) => event.type === 'tool_use' || event.type === 'tool_result'),
+      false,
+      'main display timeline should not inline hidden tool events',
+    );
 
-    const toolUse = events.json.events.find((event) => event.type === 'tool_use');
-    assert.ok(toolUse, 'tool use event should be present in the event index');
-    assert.equal(toolUse.toolInput, '', 'tool input body should be deferred from the event index');
-    assert.equal(toolUse.bodyAvailable, true, 'tool input should advertise a lazy body');
-    assert.equal(toolUse.bodyLoaded, false, 'tool input should stay unloaded in the event index');
+    const userMessage = events.json.events.find((event) => event.type === 'message' && event.role === 'user');
+    assert.ok(userMessage, 'display timeline should still expose the user message');
+    assert.equal(userMessage.content, 'Run the fake tool', 'user message content should stay inline for the visible timeline');
+    assert.equal(userMessage.bodyAvailable, undefined, 'visible user messages should not advertise a lazy body');
 
-    const toolResult = events.json.events.find((event) => event.type === 'tool_result');
-    assert.ok(toolResult, 'tool result event should be present in the event index');
-    assert.equal(toolResult.output, '', 'tool result body should be deferred from the event index');
-    assert.equal(toolResult.bodyAvailable, true, 'tool result should advertise a lazy body');
-    assert.equal(toolResult.bodyLoaded, false, 'tool result should stay unloaded in the event index');
+    const assistantMessage = events.json.events.find((event) => event.type === 'message' && event.role === 'assistant');
+    assert.ok(assistantMessage, 'display timeline should expose the assistant summary message');
+    assert.equal(assistantMessage.content, 'finished from fake codex', 'assistant summary should stay inline for the visible timeline');
+    assert.equal(assistantMessage.bodyAvailable, undefined, 'visible assistant messages should not advertise a lazy body');
+
+    const collapsedBlock = events.json.events.find((event) => event.type === 'collapsed_block');
+    assert.ok(collapsedBlock, 'display timeline should expose a collapsed hidden block');
+    assert.ok(collapsedBlock.blockStartSeq >= 1, 'collapsed block should expose a starting sequence');
+    assert.ok(collapsedBlock.blockEndSeq >= collapsedBlock.blockStartSeq, 'collapsed block should expose an ending sequence');
+
+    const block = await request(
+      port,
+      'GET',
+      `/api/sessions/${session.id}/events/blocks/${collapsedBlock.blockStartSeq}-${collapsedBlock.blockEndSeq}`,
+    );
+    assert.equal(block.status, 200, 'collapsed event block should load on demand');
+    assert.ok(Array.isArray(block.json.events), 'collapsed event block should return hidden events');
+
+    const toolUse = block.json.events.find((event) => event.type === 'tool_use');
+    assert.ok(toolUse, 'collapsed event block should include tool use');
+    assert.equal(toolUse.toolInput, 'echo fake', 'collapsed event block should inline the full tool input');
+
+    const toolResult = block.json.events.find((event) => event.type === 'tool_result');
+    assert.ok(toolResult, 'collapsed event block should include tool result');
+    assert.equal(toolResult.output, 'fake', 'collapsed event block should inline the full tool result');
 
     const toolUseBody = await request(port, 'GET', `/api/sessions/${session.id}/events/${toolUse.seq}/body`);
-    assert.equal(toolUseBody.status, 200, 'tool use body should load on demand');
-    assert.equal(toolUseBody.json.body.value, 'echo fake', 'tool use body should preserve the full inline payload');
-
-    const toolResultBody = await request(port, 'GET', `/api/sessions/${session.id}/events/${toolResult.seq}/body`);
-    assert.equal(toolResultBody.status, 200, 'tool result body should load on demand');
-    assert.equal(toolResultBody.json.body.value, 'fake', 'tool result body should preserve the full inline payload');
+    assert.equal(toolUseBody.status, 200, 'legacy tool use body route should still load on demand');
+    assert.equal(toolUseBody.json.body.value, 'echo fake', 'legacy tool use body route should preserve the full inline payload');
 
     console.log('phase10-event-index-contract: ok');
   } finally {

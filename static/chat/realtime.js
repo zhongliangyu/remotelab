@@ -503,6 +503,14 @@ function renderEvent(evt, autoScroll) {
       rendered = true;
       renderMessage(evt);
       break;
+    case "collapsed_block":
+      rendered = true;
+      renderCollapsedBlock(evt);
+      break;
+    case "thinking_block":
+      rendered = true;
+      renderThinkingBlockEvent(evt);
+      break;
     case "tool_use":
       rendered = true;
       renderToolUse(evt);
@@ -600,51 +608,12 @@ function buildTurnCollapseLabel(hiddenNodes) {
 }
 
 function applyFinishedTurnCollapseState() {
-  unwrapTurnCollapseDrawers();
-  const turns = collectRenderedTurns();
   let latestTurnStart = null;
-
-  for (let index = 0; index < turns.length; index += 1) {
-    const turn = turns[index];
-    if (!turn?.userNode || turn.bodyNodes.length === 0) continue;
-    latestTurnStart = turn.userNode;
-
-    const isLastTurn = index === turns.length - 1;
-    if (isLastTurn && (sessionStatus === "running" || inThinkingBlock)) {
-      continue;
+  for (const node of messagesInner.children) {
+    if (node === emptyState) continue;
+    if (node.classList?.contains("msg-user")) {
+      latestTurnStart = node;
     }
-
-    const lastThinkingIndex = getLastThinkingNodeIndex(turn.bodyNodes);
-    if (lastThinkingIndex < 0) continue;
-
-    const hiddenNodes = turn.bodyNodes.slice(0, lastThinkingIndex + 1);
-    const visibleNodes = turn.bodyNodes.slice(lastThinkingIndex + 1);
-    if (hiddenNodes.length === 0 || visibleNodes.length === 0) continue;
-
-    const hasVisibleTail = visibleNodes.some(
-      (node) =>
-        node.classList?.contains("msg-assistant")
-        || node.classList?.contains("msg-system")
-        || node.classList?.contains("usage-info"),
-    );
-    if (!hasVisibleTail) continue;
-
-    const drawer = document.createElement("details");
-    drawer.className = "turn-collapse-drawer";
-
-    const summary = document.createElement("summary");
-    summary.className = "turn-collapse-summary";
-    summary.textContent = buildTurnCollapseLabel(hiddenNodes);
-
-    const body = document.createElement("div");
-    body.className = "turn-collapse-body";
-    for (const node of hiddenNodes) {
-      body.appendChild(node);
-    }
-
-    drawer.appendChild(summary);
-    drawer.appendChild(body);
-    turn.userNode.insertAdjacentElement("afterend", drawer);
   }
 
   return latestTurnStart;
@@ -769,6 +738,31 @@ function enhanceCodeBlocks(root) {
 function getThinkingBody() {
   if (!inThinkingBlock) openThinkingBlock();
   return currentThinkingBlock.body;
+}
+
+function eventBlockCacheKey(sessionId, startSeq, endSeq) {
+  return `${sessionId}:${startSeq}-${endSeq}`;
+}
+
+async function fetchEventBlock(sessionId, startSeq, endSeq) {
+  const key = eventBlockCacheKey(sessionId, startSeq, endSeq);
+  if (eventBlockCache.has(key)) return eventBlockCache.get(key);
+  if (eventBlockRequests.has(key)) return eventBlockRequests.get(key);
+  const request = fetchJsonOrRedirect(
+    `/api/sessions/${encodeURIComponent(sessionId)}/events/blocks/${startSeq}-${endSeq}`,
+    { revalidate: false },
+  )
+    .then((data) => {
+      eventBlockCache.set(key, data);
+      eventBlockRequests.delete(key);
+      return data;
+    })
+    .catch((error) => {
+      eventBlockRequests.delete(key);
+      throw error;
+    });
+  eventBlockRequests.set(key, request);
+  return request;
 }
 
 function eventBodyCacheKey(sessionId, seq) {

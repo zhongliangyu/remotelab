@@ -27,7 +27,6 @@ import {
   getSession,
   getSessionBoardLayout,
   getTaskBoardState,
-  getSessionEventsAfter,
   listSessions,
   rebuildSessionBoardLayout,
   rebuildTaskBoardState,
@@ -73,6 +72,7 @@ import {
 } from './visitors.mjs';
 import { createShareSnapshot, getShareAsset, getShareSnapshot } from './shares.mjs';
 import { createSessionDetail, createSessionListItem } from './session-api-shapes.mjs';
+import { buildEventBlockEvents, buildSessionDisplayEvents } from './session-display-events.mjs';
 import { parseSessionGetRoute } from './session-route-utils.mjs';
 import { readBody } from '../lib/utils.mjs';
 import {
@@ -1245,8 +1245,41 @@ export async function handleRequest(req, res) {
   if (sessionGetRoute?.kind === 'events') {
     const { sessionId } = sessionGetRoute;
     if (!requireSessionAccess(res, authSession, sessionId)) return;
-    const events = await getSessionEventsAfter(sessionId, 0);
+    const session = await getSessionForClient(sessionId);
+    if (!session) {
+      writeJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+    const history = await getHistory(sessionId);
+    const events = buildSessionDisplayEvents(history, {
+      sessionRunning: session?.activity?.run?.state === 'running',
+    });
     writeJsonCached(req, res, { sessionId, events });
+    return;
+  }
+
+  if (sessionGetRoute?.kind === 'event-block') {
+    const {
+      sessionId,
+      startSeq,
+      endSeq,
+    } = sessionGetRoute;
+    if (!requireSessionAccess(res, authSession, sessionId)) return;
+    const session = await getSessionForClient(sessionId);
+    if (!session) {
+      writeJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+    const history = await getHistory(sessionId);
+    const events = buildEventBlockEvents(history, startSeq, endSeq);
+    if (events.length === 0) {
+      writeJson(res, 404, { error: 'Event block not found' });
+      return;
+    }
+    writeJsonCached(req, res, { sessionId, startSeq, endSeq, events }, {
+      cacheControl: IMMUTABLE_PRIVATE_EVENT_CACHE_CONTROL,
+      vary: '',
+    });
     return;
   }
 

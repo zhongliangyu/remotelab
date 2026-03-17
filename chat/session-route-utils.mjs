@@ -25,6 +25,17 @@ export function parseSessionGetRoute(pathname) {
     return { kind: 'events', sessionId };
   }
 
+  if (parts.length === 6 && parts[3] === 'events' && parts[4] === 'blocks') {
+    const match = /^([1-9]\d*)-([1-9]\d*)$/.exec(parts[5] || '');
+    if (!match) return null;
+    const startSeq = parseInt(match[1], 10);
+    const endSeq = parseInt(match[2], 10);
+    if (!Number.isInteger(startSeq) || !Number.isInteger(endSeq) || endSeq < startSeq) {
+      return null;
+    }
+    return { kind: 'event-block', sessionId, startSeq, endSeq };
+  }
+
   if (parts.length === 6 && parts[3] === 'events' && parts[5] === 'body') {
     const seq = parseInt(parts[4], 10);
     if (!Number.isInteger(seq) || seq < 1) return null;

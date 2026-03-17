@@ -657,7 +657,7 @@ The frontend is intentionally simple but still architecturally important.
 - WS only hints a refresh
 - optimistic UI is allowed, but canonical state still comes from HTTP
 - ETag-based revalidation is used for many GET reads
-- per-session event fetching is incremental via `afterSeq`
+- per-session event fetching is snapshot-style for visible timeline content, with hidden blocks loaded lazily as separate immutable resources
 
 ### 10.3 Main frontend responsibilities
 
@@ -666,7 +666,7 @@ The main chat frontend (`static/chat/`, loaded by `static/chat.js`) is responsib
 - bootstrapping owner vs visitor mode
 - listing sessions and rendering the sidebar
 - attaching to one active session
-- fetching incremental session events
+- fetching a visible event timeline plus lazy hidden-event blocks
 - rendering normalized event types
 - managing pending-message recovery on refresh
 - managing inline tool/model/reasoning selectors
@@ -699,7 +699,8 @@ Sessions:
 - `POST /api/sessions`
 - `GET /api/sessions/:id`
 - `PATCH /api/sessions/:id`
-- `GET /api/sessions/:id/events?afterSeq=...`
+- `GET /api/sessions/:id/events`
+- `GET /api/sessions/:id/events/blocks/:startSeq-:endSeq`
 - `GET /api/sessions/:id/events/:seq/body`
 - `POST /api/sessions/:id/messages`
 - `POST /api/sessions/:id/cancel`
@@ -709,7 +710,7 @@ Sessions:
 
 `GET /api/sessions` is the owner sidebar collection and returns active-session metadata only. Archived sessions are fetched separately through `GET /api/sessions/archived` so the default bootstrap path stays small without introducing pagination.
 
-The session event route is completeness-first: it returns the full event index after the given cursor. Heavy thinking and tool bodies stay deferred behind the per-event body route so session switches do not depend on a paged history fetch.
+The session event route is display-first: it returns the full visible timeline needed for the current UI, including inline user/assistant messages and synthetic collapsed blocks for hidden reasoning/tool steps. Expanding a collapsed block triggers `GET /api/sessions/:id/events/blocks/:startSeq-:endSeq`, which returns the hidden events with inline bodies and can be cached immutably. The legacy per-event body route still exists for direct event-body hydration and compatibility, but the common-path transport now avoids shipping hidden tool/reasoning payloads up front.
 
 Runs:
 

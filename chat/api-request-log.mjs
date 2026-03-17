@@ -92,8 +92,10 @@ function classifyApiRoute(method, pathname) {
   const sessionGetRoute = method === 'GET' ? parseSessionGetRoute(pathname) : null;
   if (sessionGetRoute) {
     if (sessionGetRoute.kind === 'list') return 'GET /api/sessions';
+    if (sessionGetRoute.kind === 'archived-list') return 'GET /api/sessions/archived';
     if (sessionGetRoute.kind === 'detail') return 'GET /api/sessions/:sessionId';
     if (sessionGetRoute.kind === 'events') return 'GET /api/sessions/:sessionId/events';
+    if (sessionGetRoute.kind === 'event-block') return 'GET /api/sessions/:sessionId/events/blocks/:startSeq-:endSeq';
     if (sessionGetRoute.kind === 'event-body') return 'GET /api/sessions/:sessionId/events/:seq/body';
   }
 

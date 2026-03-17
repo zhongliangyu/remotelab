@@ -289,13 +289,48 @@ function resetRenderedEventState(sessionId = null) {
   renderedEventState.sessionId = sessionId;
   renderedEventState.latestSeq = 0;
   renderedEventState.eventCount = 0;
+  renderedEventState.eventKeys = [];
+}
+
+function getEventBoundarySeq(event) {
+  if (Number.isInteger(event?.blockEndSeq) && event.blockEndSeq > 0) {
+    return event.blockEndSeq;
+  }
+  return Number.isInteger(event?.seq) ? event.seq : 0;
+}
+
+function getEventRenderKey(event) {
+  const seq = Number.isInteger(event?.seq) ? event.seq : 0;
+  const type = typeof event?.type === "string" ? event.type : "unknown";
+  if (type === "collapsed_block" || type === "thinking_block") {
+    const state = typeof event?.state === "string" ? event.state : "";
+    return `${seq}:${type}:${state}`;
+  }
+  return `${seq}:${type}`;
+}
+
+function eventKeyArraysEqual(left, right) {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function eventKeyPrefixMatches(prefix, full) {
+  if (prefix.length > full.length) return false;
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (prefix[index] !== full[index]) return false;
+  }
+  return true;
 }
 
 function getLatestEventSeq(events) {
   let latestSeq = 0;
   for (const event of events || []) {
-    if (Number.isInteger(event?.seq) && event.seq > latestSeq) {
-      latestSeq = event.seq;
+    const boundarySeq = getEventBoundarySeq(event);
+    if (boundarySeq > latestSeq) {
+      latestSeq = boundarySeq;
     }
   }
   return latestSeq;
@@ -305,11 +340,15 @@ function updateRenderedEventState(sessionId, events) {
   renderedEventState.sessionId = sessionId;
   renderedEventState.latestSeq = getLatestEventSeq(events);
   renderedEventState.eventCount = Array.isArray(events) ? events.length : 0;
+  renderedEventState.eventKeys = Array.isArray(events)
+    ? events.map((event) => getEventRenderKey(event))
+    : [];
 }
 
 function getEventRenderPlan(sessionId, events) {
   const normalizedEvents = Array.isArray(events) ? events : [];
   const latestSeq = getLatestEventSeq(normalizedEvents);
+  const nextKeys = normalizedEvents.map((event) => getEventRenderKey(event));
   const sameSession = renderedEventState.sessionId === sessionId;
   const hasRenderedSnapshot = sameSession && (
     renderedEventState.eventCount > 0
@@ -327,26 +366,18 @@ function getEventRenderPlan(sessionId, events) {
     return { mode: "reset", events: normalizedEvents };
   }
 
-  if (
-    latestSeq === renderedEventState.latestSeq &&
-    normalizedEvents.length === renderedEventState.eventCount
-  ) {
+  if (latestSeq === renderedEventState.latestSeq && eventKeyArraysEqual(nextKeys, renderedEventState.eventKeys || [])) {
     return { mode: "noop", events: [] };
   }
 
-  const appendedEvents = normalizedEvents.filter(
-    (event) => Number.isInteger(event?.seq) && event.seq > renderedEventState.latestSeq,
-  );
-
-  if (appendedEvents.length === 0) {
-    return { mode: "reset", events: normalizedEvents };
+  if (eventKeyPrefixMatches(renderedEventState.eventKeys || [], nextKeys)) {
+    const appendedEvents = normalizedEvents.slice((renderedEventState.eventKeys || []).length);
+    if (appendedEvents.length > 0) {
+      return { mode: "append", events: appendedEvents };
+    }
   }
 
-  if (appendedEvents[0].seq !== renderedEventState.latestSeq + 1) {
-    return { mode: "reset", events: normalizedEvents };
-  }
-
-  return { mode: "append", events: appendedEvents };
+  return { mode: "reset", events: normalizedEvents };
 }
 
 function reconcilePendingMessageState(event) {

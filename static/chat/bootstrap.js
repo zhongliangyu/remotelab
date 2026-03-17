@@ -287,6 +287,8 @@ const pendingSidebarSessionRefreshes = new Set();
 const jsonResponseCache = new Map();
 const eventBodyCache = new Map();
 const eventBodyRequests = new Map();
+const eventBlockCache = new Map();
+const eventBlockRequests = new Map();
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "2-digit",
   minute: "2-digit",
@@ -297,6 +299,7 @@ const renderedEventState = {
   sessionId: null,
   latestSeq: 0,
   eventCount: 0,
+  eventKeys: [],
 };
 
 function shouldUseVisitorRequests() {
