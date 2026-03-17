@@ -292,6 +292,7 @@ Common fields include:
 - `systemPrompt`
 - `completionTargets`
 - `externalTriggerId`
+- `forkedFromSessionId`, `forkedFromSeq`, `rootSessionId`, `forkedAt`
 - `archived`
 
 Stored in:
@@ -643,6 +644,28 @@ Pieces:
 - `lib/agent-mail-outbound.mjs` — outbound email delivery
 
 This subsystem shows the direction that **external channels should behave as clients of the same durable session protocol**, not as a separate architecture universe.
+
+### 9.8 Session fork flow
+
+The shipped fork model is intentionally narrow and exact.
+
+Current flow:
+
+1. owner triggers `POST /api/sessions/:id/fork`
+2. server validates access and rejects sessions that still have unstable active execution state
+3. child session metadata is created by copying parent base fields into a fresh session record
+4. full normalized history is materialized into the child history store
+5. copied events drop parent execution identity such as `runId` and `requestId`
+6. child session clears live execution linkage such as `activeRunId`, `activeRun`, provider resume ids, `externalTriggerId`, and `completionTargets`
+7. current context head is copied so the child starts from the same durable RemoteLab-side continuation state
+8. parent remains open; fork is a preparation action, not an implicit context switch
+
+Current product contract:
+
+- v1 is **head fork** only: clone the session as it exists now
+- fork is **hard clone + hard isolation**, not a shared-thread branch
+- historical `Fork from here` is deferred until RemoteLab can preserve exact pre-compaction fork state without approximation
+- the sidebar remains flat; lineage metadata exists, but there is no full tree UI subsystem yet
 
 ---
 
