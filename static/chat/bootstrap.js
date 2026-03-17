@@ -6,7 +6,6 @@ const pageBootstrap =
     ? window.__REMOTELAB_BOOTSTRAP__
     : {};
 const buildAssetVersion = buildInfo.assetVersion || "dev";
-const BUILD_FORCE_RELOAD_HOLD_MS = 700;
 
 function normalizeBootstrapText(value) {
   if (typeof value !== "string") return "";
@@ -113,7 +112,6 @@ console.info(
 
 let buildRefreshScheduled = false;
 let newerBuildInfo = null;
-let buildForceReloadHoldTimer = null;
 
 async function clearFrontendCaches() {
   if (!("serviceWorker" in navigator)) return;
@@ -132,24 +130,17 @@ function updateFrontendRefreshUi() {
   const hasUpdate = !!newerBuildInfo?.assetVersion;
   refreshFrontendBtn.hidden = !hasUpdate;
   refreshFrontendBtn.classList.toggle("ready", hasUpdate);
-  refreshFrontendBtn.textContent = hasUpdate ? "Update" : "";
+  const updateTitle = hasUpdate
+    ? "Frontend update available — tap to reload"
+    : "Reload latest frontend";
+  refreshFrontendBtn.title = updateTitle;
+  refreshFrontendBtn.setAttribute("aria-label", updateTitle);
+  if (!hasUpdate) {
+    refreshFrontendBtn.removeAttribute("aria-busy");
+  }
 }
 
-function hasPendingComposerState() {
-  const draft = typeof msgInput?.value === "string" ? msgInput.value.trim() : "";
-  return draft.length > 0 || pendingImages.length > 0;
-}
-
-function canAutoApplyFreshBuild() {
-  if (document.visibilityState !== "visible") return false;
-  if (addToolModal && !addToolModal.hidden) return false;
-  if (document.activeElement === msgInput) return false;
-  if (hasPendingComposerState()) return false;
-  if (["running", "queued", "compacting"].includes(sessionStatus)) return false;
-  return true;
-}
-
-async function reloadForFreshBuild(nextBuildInfo, { force = false } = {}) {
+async function reloadForFreshBuild(nextBuildInfo) {
   if (buildRefreshScheduled) return;
   buildRefreshScheduled = true;
   refreshFrontendBtn?.setAttribute("aria-busy", "true");
@@ -161,13 +152,6 @@ async function reloadForFreshBuild(nextBuildInfo, { force = false } = {}) {
       newerBuildInfo?.assetVersion ||
       "unknown",
   );
-  if (!force && !canAutoApplyFreshBuild()) {
-    buildRefreshScheduled = false;
-    refreshFrontendBtn?.removeAttribute("aria-busy");
-    newerBuildInfo = nextBuildInfo || newerBuildInfo;
-    updateFrontendRefreshUi();
-    return false;
-  }
   try {
     await clearFrontendCaches();
   } catch {}
@@ -189,7 +173,7 @@ async function applyBuildInfo(nextBuildInfo) {
   }
   newerBuildInfo = nextBuildInfo;
   updateFrontendRefreshUi();
-  return reloadForFreshBuild(nextBuildInfo);
+  return false;
 }
 
 window.RemoteLabBuild = {
@@ -279,27 +263,8 @@ const providerPromptCode = document.getElementById("providerPromptCode");
 const saveToolConfigBtn = document.getElementById("saveToolConfigBtn");
 const copyProviderPromptBtn = document.getElementById("copyProviderPromptBtn");
 
-function startBuildForceReloadHold() {
-  clearTimeout(buildForceReloadHoldTimer);
-  buildForceReloadHoldTimer = setTimeout(() => {
-    void reloadForFreshBuild(newerBuildInfo, { force: true });
-  }, BUILD_FORCE_RELOAD_HOLD_MS);
-}
-
-function cancelBuildForceReloadHold() {
-  clearTimeout(buildForceReloadHoldTimer);
-  buildForceReloadHoldTimer = null;
-}
-
-[headerTitle, statusDot, statusText].forEach((element) => {
-  element?.addEventListener("pointerdown", startBuildForceReloadHold);
-  element?.addEventListener("pointerup", cancelBuildForceReloadHold);
-  element?.addEventListener("pointerleave", cancelBuildForceReloadHold);
-  element?.addEventListener("pointercancel", cancelBuildForceReloadHold);
-});
-
 refreshFrontendBtn?.addEventListener("click", () => {
-  void reloadForFreshBuild(newerBuildInfo, { force: true });
+  void reloadForFreshBuild(newerBuildInfo);
 });
 
 let ws = null;
