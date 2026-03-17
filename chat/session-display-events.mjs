@@ -181,6 +181,6 @@ export function buildEventBlockEvents(history = [], startSeq = 0, endSeq = 0) {
   }
   return (Array.isArray(history) ? history : [])
     .filter((event) => Number.isInteger(event?.seq) && event.seq >= startSeq && event.seq <= endSeq)
-    .filter((event) => isHiddenEvent(event))
+    .filter((event) => !isIgnoredStatusEvent(event))
     .map(stripDeferredBodyFields);
 }

@@ -121,10 +121,11 @@ function createComposerAttachmentPreviewNode(attachment) {
 }
 
 // ---- Render functions ----
-function renderMessage(evt) {
+function renderMessageInto(container, evt, { finalizeActiveThinkingBlock = false } = {}) {
+  if (!container) return null;
   const role = evt.role || "assistant";
 
-  if (inThinkingBlock) {
+  if (finalizeActiveThinkingBlock && inThinkingBlock) {
     finalizeThinkingBlock();
   }
 
@@ -159,7 +160,8 @@ function renderMessage(evt) {
     }
     appendMessageTimestamp(bubble, evt.timestamp, "msg-user-time");
     wrap.appendChild(bubble);
-    messagesInner.appendChild(wrap);
+    container.appendChild(wrap);
+    return wrap;
   } else {
     const div = document.createElement("div");
     div.className = "msg-assistant md-content";
@@ -167,13 +169,13 @@ function renderMessage(evt) {
     content.className = "msg-assistant-body";
     if (evt.content) {
       const didRender = renderMarkdownIntoNode(content, evt.content);
-      if (!didRender) return;
+      if (!didRender) return null;
     } else if (evt.bodyAvailable) {
       if (evt.bodyPreview) {
         renderMarkdownIntoNode(content, evt.bodyPreview);
       }
     } else {
-      return;
+      return null;
     }
     div.appendChild(content);
     if (markLazyEventBodyNode(content, evt, {
@@ -185,8 +187,15 @@ function renderMessage(evt) {
       }
     }
     appendMessageTimestamp(div, evt.timestamp, "msg-assistant-time");
-    messagesInner.appendChild(div);
+    container.appendChild(div);
+    return div;
   }
+}
+
+function renderMessage(evt) {
+  return renderMessageInto(messagesInner, evt, {
+    finalizeActiveThinkingBlock: true,
+  });
 }
 
 function createToolCard(evt) {
@@ -400,6 +409,9 @@ function renderHiddenBlockEventsInto(container, events) {
   if (!container) return;
   for (const event of Array.isArray(events) ? events : []) {
     switch (event?.type) {
+      case "message":
+        renderMessageInto(container, event);
+        break;
       case "reasoning":
         renderReasoningInto(container, event);
         break;
@@ -411,6 +423,18 @@ function renderHiddenBlockEventsInto(container, events) {
         break;
       case "file_change":
         renderFileChangeInto(container, event);
+        break;
+      case "status":
+        renderStatusInto(container, event);
+        break;
+      case "context_barrier":
+        renderContextBarrierInto(container, event);
+        break;
+      case "usage":
+        renderUsageInto(container, event);
+        break;
+      default:
+        renderUnknownEventInto(container, event);
         break;
     }
   }
@@ -586,31 +610,44 @@ function renderReasoning(evt) {
   renderReasoningInto(container, evt);
 }
 
+function renderStatusInto(container, evt) {
+  if (!container) return null;
+  if (
+    !evt?.content
+    || evt.content === "completed"
+    || evt.content === "thinking"
+  ) {
+    return null;
+  }
+  const div = document.createElement("div");
+  div.className = "msg-system";
+  div.textContent = evt.content;
+  container.appendChild(div);
+  return div;
+}
+
 function renderStatusMsg(evt) {
   // Finalize thinking block when the AI turn ends (completed/error)
   if (inThinkingBlock && evt.content !== "thinking") {
     finalizeThinkingBlock();
   }
-  if (
-    !evt.content ||
-    evt.content === "completed" ||
-    evt.content === "thinking"
-  )
-    return;
+  renderStatusInto(messagesInner, evt);
+}
+
+function renderContextBarrierInto(container, evt) {
+  if (!container) return null;
   const div = document.createElement("div");
-  div.className = "msg-system";
-  div.textContent = evt.content;
-  messagesInner.appendChild(div);
+  div.className = "context-barrier";
+  div.textContent = evt.content || "Older messages above this marker are no longer in live context.";
+  container.appendChild(div);
+  return div;
 }
 
 function renderContextBarrier(evt) {
   if (inThinkingBlock) {
     finalizeThinkingBlock();
   }
-  const div = document.createElement("div");
-  div.className = "context-barrier";
-  div.textContent = evt.content || "Older messages above this marker are no longer in live context.";
-  messagesInner.appendChild(div);
+  renderContextBarrierInto(messagesInner, evt);
 }
 
 function formatCompactTokens(n) {
@@ -658,9 +695,10 @@ function updateContextDisplay(contextSize, contextWindowSize) {
   }
 }
 
-function renderUsage(evt) {
+function renderUsageInto(container, evt, { updateContext = false } = {}) {
+  if (!container) return null;
   const contextSize = getContextTokens(evt);
-  if (!(contextSize > 0)) return;
+  if (!(contextSize > 0)) return null;
   const contextWindowSize = getContextWindowTokens(evt);
   const percent = getContextPercent(contextSize, contextWindowSize);
   const output = evt.outputTokens || 0;
@@ -677,8 +715,30 @@ function renderUsage(evt) {
   }
   if (output > 0) hover.push(`Turn output: ${output.toLocaleString()}`);
   div.title = hover.join("\n");
-  messagesInner.appendChild(div);
-  updateContextDisplay(contextSize, contextWindowSize);
+  container.appendChild(div);
+  if (updateContext) {
+    updateContextDisplay(contextSize, contextWindowSize);
+  }
+  return div;
+}
+
+function renderUsage(evt) {
+  renderUsageInto(messagesInner, evt, { updateContext: true });
+}
+
+function renderUnknownEventInto(container, evt) {
+  if (!container) return null;
+  const pre = document.createElement("pre");
+  pre.className = "tool-result";
+  let text = "";
+  try {
+    text = JSON.stringify(evt || {}, null, 2);
+  } catch {
+    text = String(evt?.type || "unknown_event");
+  }
+  pre.textContent = text;
+  container.appendChild(pre);
+  return pre;
 }
 
 function esc(s) {

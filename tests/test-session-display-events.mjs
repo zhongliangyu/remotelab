@@ -29,8 +29,8 @@ assert.equal(interleavedDisplay[1].label, 'Thought · used shell', 'completed bl
 const interleavedBlockEvents = buildEventBlockEvents(interleavedTurnHistory, 3, 6);
 assert.deepEqual(
   interleavedBlockEvents.map((event) => event.type),
-  ['reasoning', 'tool_use', 'tool_result'],
-  'collapsed block payload should still expose the hidden implementation events on demand',
+  ['reasoning', 'status', 'tool_use', 'tool_result'],
+  'collapsed block payload should still expose the folded implementation events on demand',
 );
 
 const leadingVisibleStatusHistory = [
@@ -51,6 +51,13 @@ assert.equal(leadingVisibleDisplay[1].blockStartSeq, 2, 'collapsed range should 
 assert.equal(leadingVisibleDisplay[1].blockEndSeq, 4, 'collapsed range should end at the last hidden implementation event before the summary');
 assert.equal(leadingVisibleDisplay[1].label, 'Thought · used shell', 'completed folded blocks should keep the same thought header copy');
 
+const leadingVisibleBlockEvents = buildEventBlockEvents(leadingVisibleStatusHistory, 2, 4);
+assert.deepEqual(
+  leadingVisibleBlockEvents.map((event) => event.type),
+  ['status', 'reasoning', 'tool_use'],
+  'folded blocks should preserve visible intermediate status text instead of only keeping hidden tool events',
+);
+
 const runningTurnHistory = [
   { seq: 1, type: 'message', role: 'user', content: 'Work on this task' },
   { seq: 2, type: 'status', role: 'system', content: 'Preparing environment' },
@@ -69,5 +76,19 @@ assert.deepEqual(
 assert.equal(runningDisplay[1].label, 'Thinking · using bash', 'running turns should use the same thought block label family as completed turns');
 assert.equal(runningDisplay[1].blockStartSeq, 2, 'running collapsed block should start with the first non-user event in the turn');
 assert.equal(runningDisplay[1].blockEndSeq, 6, 'running collapsed block should extend through the latest in-flight event');
+
+const runningBlockEvents = buildEventBlockEvents(runningTurnHistory, 2, 6);
+assert.deepEqual(
+  runningBlockEvents.map((event) => event.type),
+  ['status', 'reasoning', 'tool_use', 'tool_result', 'message'],
+  'running folded blocks should preserve intermediate assistant text so the page can still reveal everything on demand',
+);
+
+const ignoredStatusBlockEvents = buildEventBlockEvents(interleavedTurnHistory, 2, 6);
+assert.equal(
+  ignoredStatusBlockEvents.some((event) => event.type === 'status' && event.content === 'thinking'),
+  false,
+  'transport-only thinking markers should stay omitted from the folded block payload',
+);
 
 console.log('test-session-display-events: ok');
