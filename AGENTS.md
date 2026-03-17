@@ -219,6 +219,8 @@ Reusable AI workflows shareable via link. Each App defines: name, systemPrompt, 
 
 ## Current Priorities
 
+Current operating rule: prefer capability-first shipping slices that validate the target product shape before another broad refactor round. Keep refactors limited to the work directly required by those slices or to regressions they expose.
+
 ### Done (recent)
 - [x] Owner/Visitor dual-role identity
 - [x] App system (CRUD API, share tokens, visitor flow)
@@ -226,9 +228,12 @@ Reusable AI workflows shareable via link. Each App defines: name, systemPrompt, 
 - [x] Web push notifications
 
 ### P1 — Next Up
-- [ ] Expose AI-controlled session presentation (`title`, `group`, `description`) via session APIs, then validate the AI-owned session UX and consolidate current project-session TODOs into one dedicated prioritization session
-- [ ] Universal control inbox / dispatcher session — a default high-trust chat surface that captures requests, routes substantial work into linked child sessions, and returns session/status links instead of bloating one long thread
-- [ ] Reintroduce task-progress management through session-list grouping rather than reviving a separate Progress summary board; decide explicitly whether the owner-facing board should stay single-layer and session-first, how child/subagent sessions remain mostly hidden, and whether post-reply session hooks should be unified into one per-session pass
+- [ ] Make the `Board` the primary owner work surface — productize the existing session-derived board instead of reviving a separate Progress/task model; define columns, grouping, child-session visibility, and the default owner view clearly
+- [ ] Multi-session fan-out from one owner turn — let a manager/control session intentionally spawn several focused child sessions, keep them mostly hidden by default, and return visible handoff/result links
+- [ ] Context carry/cache confirmation — validate and tune compaction, prepared fork context, and summary/cache reuse so board + multi-session flows stay fast and bounded
+- [ ] Expose AI-controlled session presentation (`title`, `group`, `description`) via session APIs, then validate the AI-owned board/inbox UX and consolidate current project-session TODOs into one dedicated prioritization session
+- [ ] Universal control inbox / dispatcher session — a default high-trust intake surface layered on top of the board + multi-session contract, not one giant always-growing work thread
+- [ ] Reintroduce task-progress management through board/grouping semantics rather than a separate Progress summary object; keep the owner-facing surface single-layer and session-first unless lived use proves otherwise
 - [ ] Skills framework (file storage + loading mechanism)
 - [ ] Provider registry abstraction — open model selection, local JS/JSON provider config, no more Claude/Codex-only model wiring
 - [ ] Provider management UX — setup/settings should support preset enablement, simple GUI JSON providers, and advanced code mode
@@ -253,6 +258,7 @@ Reusable AI workflows shareable via link. Each App defines: name, systemPrompt, 
 | Documentation Map | `docs/README.md` | Repo doc taxonomy: what lives in `docs/` vs `notes/` |
 | Notes Map | `notes/README.md` | Note taxonomy: `current` vs `directional` vs `archive` vs `local` |
 | Project Architecture | `docs/project-architecture.md` | Top-down map of the shipped system, code locations, runtime flows, and current-vs-direction split |
+| Capability-First Shipping Plan | `notes/current/capability-first-shipping-plan.md` | Current near-term product-shape note for board, multi-session fan-out, and context-carry validation |
 | Core Domain Contract | `notes/current/core-domain-contract.md` | Current domain/refactor baseline when deciding which product objects are canonical |
 | Product Surface Lifecycle | `notes/current/product-surface-lifecycle.md` | Current rule for keep/iterate/retire decisions on shipped feature surfaces |
 | External Message Protocol | `docs/external-message-protocol.md` | Canonical connector contract for email/GitHub/bot integrations using sessions, messages, runs, and events |
