@@ -397,6 +397,28 @@ function handleWsMessage(msg) {
 
 // ---- Status ----
 function updateStatus(connState, session = getCurrentSession()) {
+  if (typeof shareSnapshotMode !== "undefined" && shareSnapshotMode) {
+    statusDot.className = "status-dot";
+    statusText.textContent = "read-only snapshot";
+    msgInput.disabled = true;
+    msgInput.readOnly = true;
+    msgInput.placeholder = "Read-only snapshot";
+    sendBtn.style.display = "";
+    sendBtn.disabled = true;
+    sendBtn.title = "Read-only";
+    cancelBtn.style.display = "none";
+    imgBtn.disabled = true;
+    inlineToolSelect.disabled = true;
+    inlineModelSelect.disabled = true;
+    thinkingToggle.disabled = true;
+    effortSelect.disabled = true;
+    if (typeof syncSessionTemplateControls === "function") {
+      syncSessionTemplateControls();
+    }
+    syncForkButton();
+    syncShareButton();
+    return;
+  }
   const archived = session?.archived === true;
   if (connState === "disconnected") {
     statusDot.className = "status-dot";
@@ -776,6 +798,13 @@ async function fetchEventBlock(sessionId, startSeq, endSeq) {
   const key = eventBlockCacheKey(sessionId, startSeq, endSeq);
   if (eventBlockCache.has(key)) return eventBlockCache.get(key);
   if (eventBlockRequests.has(key)) return eventBlockRequests.get(key);
+  if ((typeof shareSnapshotMode !== "undefined" && shareSnapshotMode) && typeof getShareSnapshotEventBlock === "function") {
+    const localBlock = getShareSnapshotEventBlock(startSeq, endSeq);
+    if (localBlock) {
+      eventBlockCache.set(key, localBlock);
+      return localBlock;
+    }
+  }
   const request = fetchJsonOrRedirect(
     `/api/sessions/${encodeURIComponent(sessionId)}/events/blocks/${startSeq}-${endSeq}`,
     { revalidate: false },

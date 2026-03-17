@@ -1848,6 +1848,14 @@ body {
 body.visitor-mode .sidebar-overlay { display: none !important; }
 body.visitor-mode .header #menuBtn { display: none !important; }
 body.visitor-mode .gesture-pill { display: none !important; }
+body.share-snapshot-mode .input-area {
+  opacity: 0.72;
+}
+body.share-snapshot-mode .input-row textarea:disabled {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  cursor: not-allowed;
+}
 
 @media (max-width: 640px) {
   .provider-helper-grid { grid-template-columns: 1fr; }
@@ -1862,7 +1870,7 @@ body.visitor-mode .gesture-pill { display: none !important; }
 }
 </style>
 </head>
-<body>
+<body class="{{BODY_CLASS}}">
 <div class="app-shell">
 
 <!-- Header -->
@@ -2073,8 +2081,8 @@ body.visitor-mode .gesture-pill { display: none !important; }
   </div>
 </div>
 
-<script nonce="{{NONCE}}">window.__REMOTELAB_BUILD__ = {{BUILD_JSON}};</script>
-<script nonce="{{NONCE}}">window.__REMOTELAB_BOOTSTRAP__ = {{BOOTSTRAP_JSON}};</script>
+{{BOOTSTRAP_SCRIPT_TAGS}}
+{{EXTRA_BOOTSTRAP_SCRIPTS}}
 <script src="/marked.min.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/session-state-model.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/icons.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>

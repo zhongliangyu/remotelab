@@ -154,6 +154,7 @@ function getComposerDraftText(sessionId = currentSessionId) {
 }
 
 function sendMessage(existingRequestId) {
+  if (typeof shareSnapshotMode !== "undefined" && shareSnapshotMode) return;
   const text = msgInput.value.trim();
   const currentSession = getCurrentSession();
   if (hasPendingComposerSend()) return;

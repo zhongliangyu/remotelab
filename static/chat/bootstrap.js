@@ -37,8 +37,73 @@ function normalizeBootstrapAuthInfo(raw) {
 
 const bootstrapAuthInfo = normalizeBootstrapAuthInfo(pageBootstrap.auth);
 
+function normalizeBootstrapShareSnapshot(rawPayload, rawMeta = null) {
+  const payload = rawPayload && typeof rawPayload === "object"
+    ? rawPayload
+    : {};
+  const meta = rawMeta && typeof rawMeta === "object"
+    ? rawMeta
+    : {};
+  if (Object.keys(payload).length === 0 && Object.keys(meta).length === 0) {
+    return null;
+  }
+
+  const id = normalizeBootstrapText(payload.id || meta.id || meta.shareId);
+  const sessionRaw = payload.session && typeof payload.session === "object"
+    ? payload.session
+    : (meta.session && typeof meta.session === "object" ? meta.session : {});
+  const payloadView = payload.view && typeof payload.view === "object"
+    ? payload.view
+    : {};
+  const metaView = meta.view && typeof meta.view === "object"
+    ? meta.view
+    : {};
+  const view = {
+    ...payloadView,
+    ...metaView,
+  };
+  if (meta.badge && !view.badge) view.badge = meta.badge;
+  if (meta.note && !view.note) view.note = meta.note;
+  if (meta.titleSuffix && !view.titleSuffix) view.titleSuffix = meta.titleSuffix;
+  const eventBlocks = payload.eventBlocks && typeof payload.eventBlocks === "object"
+    ? Object.fromEntries(
+      Object.entries(payload.eventBlocks)
+        .filter(([key, events]) => typeof key === "string" && Array.isArray(events)),
+    )
+    : {};
+  const displayEvents = Array.isArray(payload.displayEvents)
+    ? payload.displayEvents.filter((event) => event && typeof event === "object")
+    : [];
+
+  return {
+    id,
+    version: payload.version,
+    createdAt: normalizeBootstrapText(payload.createdAt || meta.createdAt) || null,
+    session: {
+      name: normalizeBootstrapText(sessionRaw.name),
+      tool: normalizeBootstrapText(sessionRaw.tool),
+      created: normalizeBootstrapText(sessionRaw.created) || null,
+    },
+    view,
+    eventCount: Number.isInteger(payload.eventCount)
+      ? payload.eventCount
+      : displayEvents.length,
+    displayEvents,
+    eventBlocks,
+  };
+}
+
+const bootstrapShareSnapshot = normalizeBootstrapShareSnapshot(
+  window.__REMOTELAB_SHARE__,
+  pageBootstrap.shareSnapshot,
+);
+
 function getBootstrapAuthInfo() {
   return bootstrapAuthInfo ? { ...bootstrapAuthInfo } : null;
+}
+
+function getBootstrapShareSnapshot() {
+  return bootstrapShareSnapshot;
 }
 
 console.info(
@@ -280,6 +345,8 @@ let archivedSessionsLoading = false;
 let archivedSessionsRefreshPromise = null;
 let visitorMode = false;
 let visitorSessionId = null;
+let shareSnapshotMode = false;
+let shareSnapshotPayload = bootstrapShareSnapshot;
 let currentSessionRefreshPromise = null;
 let pendingCurrentSessionRefresh = false;
 let hasSeenWsOpen = false;

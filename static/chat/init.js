@@ -26,6 +26,14 @@ function applyVisitorMode() {
   syncShareButton();
 }
 
+function applyShareSnapshotMode(snapshot) {
+  shareSnapshotMode = true;
+  shareSnapshotPayload = snapshot;
+  applyVisitorMode();
+  document.body.classList.add("share-snapshot-mode");
+  if (statusText) statusText.textContent = "read-only snapshot";
+}
+
 // ---- Init ----
 initResponsiveLayout();
 
@@ -45,6 +53,19 @@ async function resolveInitialAuthInfo() {
 }
 
 async function initApp() {
+  const shareSnapshot =
+    typeof getBootstrapShareSnapshot === "function"
+      ? getBootstrapShareSnapshot()
+      : null;
+  if (shareSnapshot) {
+    applyShareSnapshotMode(shareSnapshot);
+    syncAddToolModal();
+    syncForkButton();
+    syncShareButton();
+    await bootstrapShareSnapshotView();
+    return;
+  }
+
   const authInfo = await resolveInitialAuthInfo();
   if (authInfo?.role === "visitor" && authInfo.sessionId) {
     visitorSessionId = authInfo.sessionId;

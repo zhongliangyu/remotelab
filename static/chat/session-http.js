@@ -220,6 +220,95 @@ function resolveRequestUrl(url) {
   return typeof url === "string" ? url : String(url || "");
 }
 
+function getActiveShareSnapshotPayload() {
+  return typeof shareSnapshotPayload !== "undefined"
+    ? shareSnapshotPayload
+    : null;
+}
+
+function isShareSnapshotReadOnlyMode() {
+  return typeof shareSnapshotMode !== "undefined" && shareSnapshotMode === true;
+}
+
+function hasShareSnapshotPayload() {
+  const payload = getActiveShareSnapshotPayload();
+  return !!(payload && typeof payload === "object");
+}
+
+function buildShareSnapshotSessionId(snapshot = getActiveShareSnapshotPayload()) {
+  const rawId = typeof snapshot?.id === "string" ? snapshot.id.trim() : "";
+  return rawId ? `share_snapshot:${rawId}` : "share_snapshot";
+}
+
+function getShareSnapshotDisplayEvents(snapshot = getActiveShareSnapshotPayload()) {
+  return Array.isArray(snapshot?.displayEvents) ? snapshot.displayEvents : [];
+}
+
+function getShareSnapshotEventBlock(startSeq, endSeq, snapshot = getActiveShareSnapshotPayload()) {
+  const key = `${startSeq}-${endSeq}`;
+  const events = Array.isArray(snapshot?.eventBlocks?.[key])
+    ? snapshot.eventBlocks[key]
+    : null;
+  if (!events) return null;
+  return {
+    sessionId: buildShareSnapshotSessionId(snapshot),
+    startSeq,
+    endSeq,
+    events,
+  };
+}
+
+function getShareSnapshotLastEventAt(snapshot = getActiveShareSnapshotPayload()) {
+  const displayEvents = getShareSnapshotDisplayEvents(snapshot);
+  for (let index = displayEvents.length - 1; index >= 0; index -= 1) {
+    const stamp = typeof displayEvents[index]?.timestamp === "string"
+      ? displayEvents[index].timestamp.trim()
+      : "";
+    if (stamp) return stamp;
+  }
+  return typeof snapshot?.createdAt === "string" && snapshot.createdAt.trim()
+    ? snapshot.createdAt.trim()
+    : null;
+}
+
+function getShareSnapshotViewValue(key, fallback = "") {
+  const value = getActiveShareSnapshotPayload()?.view?.[key];
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : fallback;
+}
+
+function buildShareSnapshotSessionRecord(snapshot = getActiveShareSnapshotPayload()) {
+  if (!(snapshot && typeof snapshot === "object")) return null;
+  const displayEvents = getShareSnapshotDisplayEvents(snapshot);
+  const name = typeof snapshot?.session?.name === "string" && snapshot.session.name.trim()
+    ? snapshot.session.name.trim()
+    : (typeof snapshot?.session?.tool === "string" && snapshot.session.tool.trim()
+      ? snapshot.session.tool.trim()
+      : "Shared session snapshot");
+  const lastEventAt = getShareSnapshotLastEventAt(snapshot);
+  return {
+    id: buildShareSnapshotSessionId(snapshot),
+    name,
+    tool: typeof snapshot?.session?.tool === "string" ? snapshot.session.tool.trim() : "",
+    created: typeof snapshot?.session?.created === "string" && snapshot.session.created.trim()
+      ? snapshot.session.created.trim()
+      : (typeof snapshot?.createdAt === "string" && snapshot.createdAt.trim()
+        ? snapshot.createdAt.trim()
+        : null),
+    updatedAt: lastEventAt,
+    lastEventAt,
+    sourceId: "share_snapshot",
+    sourceName: getShareSnapshotViewValue("badge", "Shared Snapshot"),
+    messageCount: displayEvents.filter((event) => event?.type === "message").length,
+    activity: {
+      run: { state: "idle" },
+      queue: { state: "idle", count: 0 },
+      compact: { state: "idle" },
+    },
+  };
+}
+
 async function fetchJsonOrRedirect(url, options = {}) {
   const requestOptions = { ...options };
   const revalidate = requestOptions.revalidate !== false;
@@ -835,6 +924,10 @@ function applyAttachedSessionState(id, session) {
 
   const displayName = getSessionDisplayName(session);
   headerTitle.textContent = displayName;
+  if (shareSnapshotMode) {
+    const titleSuffix = getShareSnapshotViewValue("titleSuffix", "Shared Snapshot");
+    document.title = `${displayName} · ${titleSuffix}`;
+  }
   if (typeof reconcileComposerPendingSendWithSession === "function") {
     reconcileComposerPendingSendWithSession(session);
   }
@@ -862,6 +955,17 @@ function applyAttachedSessionState(id, session) {
 }
 
 async function fetchSessionState(sessionId) {
+  if (isShareSnapshotReadOnlyMode()) {
+    const snapshotSession = buildShareSnapshotSessionRecord();
+    if (!snapshotSession || snapshotSession.id !== sessionId) {
+      throw new Error("Session not found");
+    }
+    const normalized = upsertSession(snapshotSession);
+    if (normalized && currentSessionId === sessionId) {
+      applyAttachedSessionState(sessionId, normalized);
+    }
+    return normalized;
+  }
   const data = await fetchJsonOrRedirect(`/api/sessions/${encodeURIComponent(sessionId)}`);
   const normalized = upsertSession(data.session);
   if (normalized && currentSessionId === sessionId) {
@@ -877,9 +981,11 @@ async function fetchSessionEvents(sessionId, { runState = "idle" } = {}) {
   const shouldStickToBottom =
     !hadRenderedMessages ||
     messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120;
-  const data = await fetchJsonOrRedirect(
-    `/api/sessions/${encodeURIComponent(sessionId)}/events?filter=visible`,
-  );
+  const data = isShareSnapshotReadOnlyMode()
+    ? { events: getShareSnapshotDisplayEvents() }
+    : await fetchJsonOrRedirect(
+      `/api/sessions/${encodeURIComponent(sessionId)}/events?filter=visible`,
+    );
   const events = data.events || [];
   if (currentSessionId !== sessionId) return events;
   const renderPlan = getEventRenderPlan(sessionId, events);
@@ -1058,6 +1164,22 @@ async function bootstrapViaHttp({ deferOwnerRestore = false } = {}) {
   if (!deferOwnerRestore) {
     restoreOwnerSessionSelection();
   }
+}
+
+async function bootstrapShareSnapshotView() {
+  const session = buildShareSnapshotSessionRecord();
+  if (!session) {
+    showEmpty();
+    return null;
+  }
+  sessions = [normalizeSessionRecord(session, sessions.find((entry) => entry.id === session.id) || null)];
+  hasLoadedSessions = true;
+  archivedSessionCount = 0;
+  archivedSessionsLoaded = false;
+  visitorSessionId = session.id;
+  currentSessionId = session.id;
+  attachSession(session.id, sessions[0]);
+  return sessions[0];
 }
 
 async function setupPushNotifications() {

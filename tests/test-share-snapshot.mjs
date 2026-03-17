@@ -236,17 +236,17 @@ async function main() {
   assert.match(publicShareRes.headers['content-security-policy'] || '', /connect-src 'none'/, 'share page CSP should block network access');
   assert.match(publicShareRes.headers['content-security-policy'] || '', /media-src 'self' data: blob:/, 'share page CSP should allow public media playback');
   assert.strictEqual(publicShareRes.headers['referrer-policy'], 'no-referrer', 'share page should suppress referrer leakage');
-  assert.match(publicShareRes.body, /Read-only snapshot/, 'share page should be read-only');
   assert.match(publicShareRes.body, /<meta name="color-scheme" content="light dark">/);
-  assert.match(publicShareRes.body, /<meta name="theme-color" content="#f5f7fb" media="\(prefers-color-scheme: light\)">/);
-  assert.match(publicShareRes.body, /<meta name="theme-color" content="#0b1020" media="\(prefers-color-scheme: dark\)">/);
+  assert.match(publicShareRes.body, /<meta name="theme-color" content="#ffffff" media="\(prefers-color-scheme: light\)">/);
+  assert.match(publicShareRes.body, /<meta name="theme-color" content="#1e1e1e" media="\(prefers-color-scheme: dark\)">/);
   assert.match(publicShareRes.body, /@media \(prefers-color-scheme: dark\)/);
   assert.match(publicShareRes.body, /\/favicon\.ico\?v=/, 'share page should fingerprint icon URLs for immutable caching');
   assert.match(publicShareRes.body, /\/icon\.svg\?v=/, 'share page should fingerprint svg icon URLs for immutable caching');
   assert.ok(publicShareRes.body.includes(`/share-payload/${shareId}.js`), 'share shell should bootstrap an external payload resource');
   assert.ok(!publicShareRes.body.includes('window.__REMOTELAB_SHARE__ ='), 'share shell should not inline the snapshot payload');
   assert.ok(!publicShareRes.body.includes('Please review this snippet.'), 'share shell should not inline conversation bodies');
-  assert.ok(!publicShareRes.body.includes('msgInput'), 'share page should not include live chat input');
+  assert.ok(publicShareRes.body.includes('visitor-mode share-snapshot-mode'), 'share page should preload the chat shell in read-only visitor mode');
+  assert.match(publicShareRes.body, /<textarea id="msgInput"[^>]*disabled>/, 'share page should reuse the normal chat composer shell in a disabled state');
   assert.ok(!publicShareRes.body.includes('/api/auth/me'), 'share page should not bootstrap owner auth UI');
   assert.ok(!publicShareRes.body.includes('/ws'), 'share page should not connect to live websocket');
   const publicShare304Res = await request('GET', sharePayload.share.url, {
@@ -262,6 +262,8 @@ async function main() {
   assert.ok(payloadRes.headers.etag, 'share payload should expose an ETag');
   assert.match(payloadRes.headers['content-type'] || '', /^application\/javascript;/, 'share payload should be served as JavaScript');
   assert.ok(payloadRes.body.includes('window.__REMOTELAB_SHARE__ ='), 'share payload should assign the snapshot data');
+  assert.ok(payloadRes.body.includes('displayEvents'), 'share payload should expose chat-ready display events');
+  assert.ok(payloadRes.body.includes('eventBlocks'), 'share payload should expose collapsed block payloads for the chat viewer');
   assert.ok(payloadRes.body.includes('Please review this snippet.'), 'share payload should include conversation bodies');
   assert.ok(payloadRes.body.includes(storedAttachment.url), 'share payload should reference external attachment URLs');
   assert.ok(!payloadRes.body.includes('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0WQAAAAASUVORK5CYII='), 'share payload should not inline attachment base64');

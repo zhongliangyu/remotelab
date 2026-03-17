@@ -338,9 +338,17 @@ function renderPageTemplate(template, nonce, replacements = {}) {
     BUILD_LABEL: BUILD_INFO.label,
     BUILD_TITLE: BUILD_INFO.title,
     BUILD_JSON: serializeJsonForScript(BUILD_INFO),
+    BODY_CLASS: '',
     BOOTSTRAP_JSON: serializeJsonForScript({ auth: null }),
+    EXTRA_BOOTSTRAP_SCRIPTS: '',
     ...replacements,
   };
+  if (!Object.prototype.hasOwnProperty.call(replacements, 'BOOTSTRAP_SCRIPT_TAGS')) {
+    merged.BOOTSTRAP_SCRIPT_TAGS = [
+      `<script nonce="${merged.NONCE}">window.__REMOTELAB_BUILD__ = ${merged.BUILD_JSON};</script>`,
+      `<script nonce="${merged.NONCE}">window.__REMOTELAB_BOOTSTRAP__ = ${merged.BOOTSTRAP_JSON};</script>`,
+    ].join('\n');
+  }
   return Object.entries(merged).reduce(
     (output, [key, value]) => output.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), String(value ?? '')),
     template,
@@ -790,7 +798,11 @@ async function isDirectoryPath(path) {
   return (await statOrNull(path))?.isDirectory() === true;
 }
 
-function setShareSnapshotHeaders(res) {
+function setShareSnapshotHeaders(res, nonce = '') {
+  const scriptSrc = ["'self'"];
+  if (typeof nonce === 'string' && nonce) {
+    scriptSrc.push(`'nonce-${nonce}'`);
+  }
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
@@ -801,7 +813,7 @@ function setShareSnapshotHeaders(res) {
     "form-action 'none'",
     "frame-ancestors 'none'",
     "connect-src 'none'",
-    "script-src 'self'",
+    `script-src ${scriptSrc.join(' ')}`,
     "style-src 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "media-src 'self' data: blob:",
@@ -809,18 +821,59 @@ function setShareSnapshotHeaders(res) {
   ].join('; '));
 }
 
+function buildShareSnapshotClientPayload(snapshot) {
+  const timelineEvents = Array.isArray(snapshot?.events)
+    ? snapshot.events
+      .filter((event) => event && typeof event === 'object')
+      .map((event, index) => ({
+        ...event,
+        seq: Number.isInteger(event.seq) && event.seq > 0 ? event.seq : index + 1,
+      }))
+    : [];
+  const displayEvents = buildSessionDisplayEvents(timelineEvents, {
+    sessionRunning: false,
+  });
+  const eventBlocks = Object.create(null);
+  for (const event of displayEvents) {
+    if ((event?.type !== 'collapsed_block' && event?.type !== 'thinking_block')) continue;
+    const startSeq = Number.isInteger(event?.blockStartSeq) ? event.blockStartSeq : 0;
+    const endSeq = Number.isInteger(event?.blockEndSeq) ? event.blockEndSeq : 0;
+    if (startSeq < 1 || endSeq < startSeq) continue;
+    const key = `${startSeq}-${endSeq}`;
+    if (eventBlocks[key]) continue;
+    eventBlocks[key] = buildEventBlockEvents(timelineEvents, startSeq, endSeq);
+  }
+
+  return {
+    id: snapshot?.id,
+    version: snapshot?.version,
+    createdAt: snapshot?.createdAt || null,
+    session: snapshot?.session && typeof snapshot.session === 'object'
+      ? snapshot.session
+      : {},
+    view: snapshot?.view && typeof snapshot.view === 'object'
+      ? snapshot.view
+      : {},
+    eventCount: timelineEvents.length,
+    displayEvents,
+    eventBlocks,
+  };
+}
+
 async function writeSnapshotPage(req, res, shareId, {
   cacheControl,
   headers = {},
   failureText = 'Failed to load snapshot page',
 } = {}) {
-  setShareSnapshotHeaders(res);
+  const pageNonce = '';
+  setShareSnapshotHeaders(res, pageNonce);
   try {
     const pageBuildInfo = await getPageBuildInfo();
-    const sharePage = await readFile(shareTemplatePath, 'utf8');
-    const body = renderPageTemplate(sharePage, '', {
+    const sharePage = await readFile(chatTemplatePath, 'utf8');
+    const body = renderPageTemplate(sharePage, pageNonce, {
       ...buildTemplateReplacements(pageBuildInfo),
-      SHARE_PAYLOAD_URL: `/share-payload/${shareId}.js`,
+      BODY_CLASS: 'visitor-mode share-snapshot-mode',
+      BOOTSTRAP_SCRIPT_TAGS: `<script src="/share-payload/${shareId}.js"></script>`,
     });
     writeCachedResponse(req, res, {
       statusCode: 200,
@@ -1061,7 +1114,22 @@ export async function handleRequest(req, res) {
       res.end('Shared snapshot not found');
       return;
     }
-    const body = `window.__REMOTELAB_SHARE__ = ${serializeJsonForScript(snapshot)};`;
+    const pageBuildInfo = await getPageBuildInfo();
+    const clientPayload = buildShareSnapshotClientPayload(snapshot);
+    const bootstrap = {
+      auth: null,
+      shareSnapshot: {
+        id: sharePayloadId,
+        badge: 'Read-only snapshot',
+        titleSuffix: 'Shared Snapshot',
+        note: 'This link exposes only this captured conversation snapshot. It cannot send messages, join a live session, or browse any other RemoteLab content.',
+      },
+    };
+    const body = [
+      `window.__REMOTELAB_BUILD__ = ${serializeJsonForScript(pageBuildInfo)};`,
+      `window.__REMOTELAB_BOOTSTRAP__ = ${serializeJsonForScript(bootstrap)};`,
+      `window.__REMOTELAB_SHARE__ = ${serializeJsonForScript(clientPayload)};`,
+    ].join('\n');
     writeCachedResponse(req, res, {
       statusCode: 200,
       contentType: 'application/javascript; charset=utf-8',
