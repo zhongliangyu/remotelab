@@ -1,5 +1,5 @@
 import { homedir } from 'os';
-import { MEMORY_DIR, SYSTEM_MEMORY_DIR } from '../lib/config.mjs';
+import { CHAT_PORT, MEMORY_DIR, SYSTEM_MEMORY_DIR } from '../lib/config.mjs';
 import { join } from 'path';
 import { pathExists } from './fs-utils.mjs';
 
@@ -13,8 +13,9 @@ const SKILLS_MD = join(MEMORY_DIR, 'skills.md');
  * This is a lightweight pointer structure — tells the model how to activate
  * memory progressively instead of front-loading unrelated context.
  */
-export async function buildSystemContext() {
+export async function buildSystemContext(options = {}) {
   const home = homedir();
+  const currentSessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : '';
   const [hasBootstrap, hasGlobal, hasProjects, hasSkills] = await Promise.all([
     pathExists(BOOTSTRAP_MD),
     pathExists(GLOBAL_MD),
@@ -58,6 +59,28 @@ At the START of every session, load only the minimum context needed to orient yo
 - Prefer continuing in a fresh working child/fork derived from the template/base so the canonical template stays clean.
 - Do not force this for tiny or obviously one-off tasks.
 - Until true hidden orchestration exists, approximate the behavior by loading the best matching template context and continuing normally.
+
+## Parallel Session Spawning
+
+- RemoteLab can spawn a fresh parallel session from the current session when work should split for context hygiene or parallel progress.
+- This is not primarily a user-facing UI action; treat it as an internal capability you may invoke yourself when useful.
+- Two patterns are supported:
+  - Independent side session: create a new session and let it continue on its own.
+  - Waited subagent: create a new session, wait for its result, then summarize the result back in the current session.
+- Do not over-model durable hierarchy here: the spawned session can be treated as an independent worker that simply received bounded handoff context from this session.
+- Preferred command:
+  - remotelab session-spawn --task "<focused task>" --json
+- Waited subagent variant:
+  - remotelab session-spawn --task "<focused task>" --wait --json
+- If the remotelab command is unavailable in PATH, use:
+  - node "$REMOTELAB_PROJECT_ROOT/cli.js" session-spawn --task "<focused task>" --json
+- The shell environment exposes:
+  - REMOTELAB_SESSION_ID — current source session id${currentSessionId ? ` (current: ${currentSessionId})` : ''}
+  - REMOTELAB_CHAT_BASE_URL — local RemoteLab API base URL (usually http://127.0.0.1:${CHAT_PORT})
+  - REMOTELAB_PROJECT_ROOT — local RemoteLab project root for fallback commands
+- The spawn command defaults to REMOTELAB_SESSION_ID, so you usually do not need to pass --source-session explicitly.
+- RemoteLab automatically writes a small visible handoff note back into the source session so the owner can see what was spawned.
+- Use this capability judiciously: split work when it reduces context pressure or enables real parallelism, not for every trivial substep.
 
 ### User-Level Memory (private, machine-specific)
 Location: ~/.remotelab/memory/

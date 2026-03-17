@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
 import { createInterface } from 'readline';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { createToolInvocation, prependAttachmentPaths, resolveCommand, resolveCwd } from './process-runner.mjs';
 import {
   buildCodexContextMetricsPayload,
   readLatestCodexSessionMetrics,
 } from './codex-session-metrics.mjs';
+import { CHAT_PORT } from '../lib/config.mjs';
 import {
   appendRunSpoolRecord,
   getRun,
@@ -16,15 +19,25 @@ import {
 import { fullPath } from '../lib/tools.mjs';
 
 const runId = process.argv[2];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(__dirname, '..');
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-function cleanEnv() {
+function cleanEnv(manifest = {}) {
   const env = { ...process.env, PATH: fullPath };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
+  env.REMOTELAB_CHAT_BASE_URL = process.env.REMOTELAB_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`;
+  env.REMOTELAB_PROJECT_ROOT = process.env.REMOTELAB_PROJECT_ROOT || PROJECT_ROOT;
+  if (typeof manifest?.sessionId === 'string' && manifest.sessionId.trim()) {
+    env.REMOTELAB_SESSION_ID = manifest.sessionId.trim();
+  }
+  if (runId) {
+    env.REMOTELAB_RUN_ID = runId;
+  }
   return env;
 }
 
@@ -96,7 +109,7 @@ async function main() {
   const proc = spawn(await resolveCommand(command), args, {
     cwd: resolveCwd(manifest.folder),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: cleanEnv(),
+    env: cleanEnv(manifest),
   });
 
   await updateRun(runId, (current) => ({

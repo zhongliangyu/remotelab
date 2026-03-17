@@ -693,9 +693,6 @@ function applyAttachedSessionState(id, session) {
   restoreDraft();
   renderSessionList();
   syncBrowserState();
-  if (typeof syncDelegateButton === "function") {
-    syncDelegateButton();
-  }
   syncForkButton();
   syncShareButton();
 }

@@ -10,6 +10,7 @@ import {
   appendEvents,
   clearContextHead,
   clearForkContext,
+  findLatestAssistantMessage,
   getContextHead,
   getForkContext,
   getHistorySnapshot,
@@ -319,26 +320,38 @@ function findLatestTurnMessage(events, role) {
   for (let index = list.length - 1; index >= 0; index -= 1) {
     const event = list[index];
     if (event?.type === 'message' && event.role === role) {
+      if (role === 'assistant' && event.messageKind === 'session_delegate_notice') {
+        continue;
+      }
       return event;
     }
   }
   return null;
 }
 
-function buildDelegationStatusText(task, childSession) {
-  const normalizedTask = clipCompactionSection(task, 120)
+function buildSessionNavigationHref(sessionId) {
+  const normalized = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalized) return '/?tab=sessions';
+  return `/?session=${encodeURIComponent(normalized)}&tab=sessions`;
+}
+
+function buildDelegationNoticeMessage(task, childSession) {
+  const normalizedTask = clipCompactionSection(task, 240)
     .replace(/\s+/g, ' ')
     .trim();
   const childName = typeof childSession?.name === 'string'
     ? childSession.name.trim()
-    : '';
-  if (normalizedTask && childName) {
-    return `Delegated "${normalizedTask}" to ${childName}`;
-  }
-  if (childName) {
-    return `Delegated work to ${childName}`;
-  }
-  return 'Delegated work to a child session';
+    : 'new session';
+  const childId = typeof childSession?.id === 'string' ? childSession.id.trim() : '';
+  const link = childId ? `[${childName}](${buildSessionNavigationHref(childId)})` : childName;
+  return [
+    'Spawned a parallel session for this work.',
+    '',
+    normalizedTask ? `- Task: ${normalizedTask}` : '',
+    `- Session: ${link}`,
+    '',
+    'This new session is independent and can continue on its own.',
+  ].filter(Boolean).join('\n');
 }
 
 function normalizeSessionAppName(value) {
@@ -1237,8 +1250,6 @@ function buildDelegationHandoff({
 }) {
   const normalizedTask = clipCompactionSection(task, 4000);
   const parentName = typeof source?.name === 'string' ? source.name.trim() : '';
-  const parentGroup = normalizeSessionGroup(source?.group || '');
-  const parentDescription = normalizeSessionDescription(source?.description || '');
   const latestUserText = clipCompactionSection(lastUserMessage?.content || '', 5000);
   const latestAssistantText = clipCompactionSection(lastAssistantMessage?.content || '', 7000);
   const contextSummary = clipCompactionSection(contextHead?.summary || '', 7000);
@@ -1256,11 +1267,9 @@ function buildDelegationHandoff({
     normalizedTask || '(no delegated task provided)',
   ];
 
-  if (parentName || parentGroup || parentDescription) {
+  if (parentName) {
     lines.push('', '## Parent session');
     if (parentName) lines.push(`- Title: ${parentName}`);
-    if (parentGroup) lines.push(`- Group: ${parentGroup}`);
-    if (parentDescription) lines.push(`- Description: ${parentDescription}`);
   }
 
   if (latestUserText) {
@@ -1634,7 +1643,7 @@ async function buildPrompt(sessionId, session, text, previousTool, effectiveTool
     }
 
     if (!hasResume) {
-      const systemContext = await buildSystemContext();
+      const systemContext = await buildSystemContext({ sessionId });
       let preamble = systemContext;
       if (session.systemPrompt) {
         preamble += `\n\n---\n\nApp instructions (follow these for this session):\n${session.systemPrompt}`;
@@ -2640,11 +2649,8 @@ export async function createSession(folder, tool, name, extra = {}) {
     if (externalTriggerId) session.externalTriggerId = externalTriggerId;
     if (extra.forkedFromSessionId) session.forkedFromSessionId = extra.forkedFromSessionId;
     if (Number.isInteger(extra.forkedFromSeq)) session.forkedFromSeq = extra.forkedFromSeq;
-    if (extra.delegatedFromSessionId) session.delegatedFromSessionId = extra.delegatedFromSessionId;
-    if (Number.isInteger(extra.delegatedFromSeq)) session.delegatedFromSeq = extra.delegatedFromSeq;
     if (extra.rootSessionId) session.rootSessionId = extra.rootSessionId;
     if (extra.forkedAt) session.forkedAt = extra.forkedAt;
-    if (extra.delegatedAt) session.delegatedAt = extra.delegatedAt;
     if (completionTargets.length > 0) session.completionTargets = completionTargets;
 
     metas.push(session);
@@ -3404,10 +3410,12 @@ export async function forkSession(sessionId) {
 }
 
 export async function delegateSession(sessionId, payload = {}) {
-  const source = await getSession(sessionId);
+  const [source, sourceMeta] = await Promise.all([
+    getSession(sessionId),
+    findSessionMeta(sessionId),
+  ]);
   if (!source) return null;
   if (source.visitorId) return null;
-  if (isSessionRunning(source)) return null;
 
   const task = typeof payload?.task === 'string' ? payload.task.trim() : '';
   if (!task) {
@@ -3420,11 +3428,17 @@ export async function delegateSession(sessionId, payload = {}) {
     readLastTurnEvents(sessionId, { includeBodies: true }),
   ]);
   const lastUserMessage = findLatestTurnMessage(lastTurnEvents, 'user');
-  const lastAssistantMessage = findLatestTurnMessage(lastTurnEvents, 'assistant');
+  const activeRunId = typeof sourceMeta?.activeRunId === 'string' ? sourceMeta.activeRunId.trim() : '';
+  const lastAssistantMessage = await findLatestAssistantMessage(sessionId, {
+    includeBodies: true,
+    match: (event) => {
+      if (event?.messageKind === 'session_delegate_notice') return false;
+      if (activeRunId && event?.runId === activeRunId) return false;
+      return true;
+    },
+  });
 
   const child = await createSession(source.folder, source.tool, requestedName || buildDelegatedSessionName(source, task), {
-    group: source.group || '',
-    description: source.description || '',
     appId: source.appId || '',
     appName: source.appName || '',
     sourceId: source.sourceId || '',
@@ -3432,10 +3446,6 @@ export async function delegateSession(sessionId, payload = {}) {
     systemPrompt: source.systemPrompt || '',
     userId: source.userId || '',
     userName: source.userName || '',
-    delegatedFromSessionId: source.id,
-    delegatedFromSeq: source.latestSeq || 0,
-    rootSessionId: source.rootSessionId || source.id,
-    delegatedAt: nowIso(),
   });
   if (!child) return null;
 
@@ -3450,7 +3460,9 @@ export async function delegateSession(sessionId, payload = {}) {
     requestId: createInternalRequestId('delegate'),
   });
 
-  await appendEvent(source.id, statusEvent(buildDelegationStatusText(task, child)));
+  await appendEvent(source.id, messageEvent('assistant', buildDelegationNoticeMessage(task, child), undefined, {
+    messageKind: 'session_delegate_notice',
+  }));
   broadcastSessionInvalidation(source.id);
 
   return {

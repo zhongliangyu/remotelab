@@ -8,7 +8,7 @@ process.env.HOME = tempHome;
 
 const { buildSystemContext } = await import('../chat/system-prompt.mjs');
 
-const context = await buildSystemContext();
+const context = await buildSystemContext({ sessionId: 'session-test-123' });
 
 assert.match(context, /Template-Session-First Routing/);
 assert.match(context, /reusable template\/base session likely exists/);
@@ -17,5 +17,12 @@ assert.match(context, /improve it or derive a better template\/base/);
 assert.match(context, /saved template context as bootstrap, not eternal truth/);
 assert.match(context, /fresh working child\/fork/);
 assert.match(context, /approximate the behavior by loading the best matching template context/);
+assert.match(context, /Parallel Session Spawning/);
+assert.match(context, /not primarily a user-facing UI action/);
+assert.match(context, /independent worker that simply received bounded handoff context/);
+assert.match(context, /remotelab session-spawn --task/);
+assert.match(context, /--wait --json/);
+assert.match(context, /REMOTELAB_SESSION_ID/);
+assert.match(context, /session-test-123/);
 
 console.log('test-system-prompt: ok');

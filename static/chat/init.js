@@ -22,9 +22,6 @@ function applyVisitorMode() {
   } else if (typeof syncInputHeightForLayout === "function") {
     syncInputHeightForLayout();
   }
-  if (typeof syncDelegateButton === "function") {
-    syncDelegateButton();
-  }
   syncForkButton();
   syncShareButton();
 }
@@ -61,9 +58,6 @@ async function initApp() {
   }
 
   syncAddToolModal();
-  if (typeof syncDelegateButton === "function") {
-    syncDelegateButton();
-  }
   syncForkButton();
   syncShareButton();
   if (visitorMode) {

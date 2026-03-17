@@ -424,9 +424,6 @@ function updateStatus(connState, session = getCurrentSession()) {
   if (typeof syncSessionTemplateControls === "function") {
     syncSessionTemplateControls();
   }
-  if (typeof syncDelegateButton === "function") {
-    syncDelegateButton();
-  }
   syncForkButton();
   syncShareButton();
 }
@@ -450,9 +447,6 @@ function showEmpty() {
   currentThinkingBlock = null;
   if (typeof syncSessionTemplateControls === "function") {
     syncSessionTemplateControls();
-  }
-  if (typeof syncDelegateButton === "function") {
-    syncDelegateButton();
   }
   syncForkButton();
   syncShareButton();

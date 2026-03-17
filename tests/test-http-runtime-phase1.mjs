@@ -781,8 +781,7 @@ async function phase13DelegateSession() {
     const delegateNotice = parentEvents.events.find((event) => event.type === 'message' && event.role === 'assistant' && event.messageKind === 'session_delegate_notice');
     assert.ok(delegateNotice, 'delegation should append a visible handoff note to the parent session');
     assert.match(delegateNotice.content || '', /Spawned a parallel session/, 'handoff note should describe the spawn');
-    assert.match(delegateNotice.content || '', new RegExp(`\
-session=${delegate.json.session.id}`.trim()), 'handoff note should include a direct session link');
+    assert.match(delegateNotice.content || '', new RegExp(`session=${delegate.json.session.id}`), 'handoff note should include a direct session link');
     assert.match(delegateNotice.content || '', /Figure out a lightweight child-session strategy for parallel work\./, 'handoff note should include the delegated task');
 
     const running = await createSession(port, {

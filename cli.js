@@ -32,6 +32,7 @@ Usage:
   remotelab stop                     Stop all services
   remotelab restart [service]        Restart services (chat|tunnel|all)
   remotelab chat                     Run chat server in foreground
+  remotelab session-spawn            Spawn a focused parallel session from a source session
   remotelab generate-token           Generate a new access token
   remotelab set-password             Set username & password for login
   remotelab --help                   Show this help message
@@ -64,6 +65,18 @@ switch (command) {
   case 'chat':
     await import(scriptPath('chat-server.mjs'));
     break;
+
+  case 'session-spawn':
+  case 'spawn-session': {
+    const { runSessionSpawnCommand } = await import(scriptPath('lib/session-spawn-command.mjs'));
+    try {
+      process.exitCode = await runSessionSpawnCommand(args);
+    } catch (error) {
+      console.error(error.message || String(error));
+      process.exit(1);
+    }
+    break;
+  }
 
   case 'generate-token': {
     try {
