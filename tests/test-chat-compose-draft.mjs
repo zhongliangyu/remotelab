@@ -364,6 +364,64 @@ queuedSendContext.reconcileComposerPendingSendWithSession({
 assert.equal(queuedSendContext.msgInput.value, '', 'queued sends should clear the composer once the server reflects the queued request');
 assert.equal(queuedSendContext.localStorage.getItem('draft_session-a'), null, 'queued sends should also clear the stored draft after server confirmation');
 
+const runningTakeoverContext = createContext();
+runningTakeoverContext.dispatchAction = async () => true;
+runningTakeoverContext.getCurrentSession = () => ({
+  archived: false,
+  activity: {
+    run: { state: 'idle', phase: null, runId: null },
+    queue: { state: 'idle', count: 0 },
+  },
+});
+vm.runInNewContext(composeSource, runningTakeoverContext, { filename: 'static/chat/compose.js' });
+runningTakeoverContext.msgInput.value = 'turn this into a real run';
+runningTakeoverContext.saveDraft();
+runningTakeoverContext.sendMessage();
+await Promise.resolve();
+assert.equal(runningTakeoverContext.msgInput.readOnly, true, 'composer should briefly lock before the server confirms acceptance');
+runningTakeoverContext.reconcileComposerPendingSendWithSession({
+  id: 'session-a',
+  activity: {
+    run: { state: 'running', phase: 'running', runId: 'run_1' },
+    queue: { state: 'idle', count: 0 },
+  },
+});
+assert.equal(runningTakeoverContext.msgInput.value, '', 'server running state should immediately clear the local sending draft');
+assert.equal(runningTakeoverContext.msgInput.readOnly, false, 'server running state should immediately unlock the composer');
+assert.equal(runningTakeoverContext.inputArea.classList.contains('is-pending-send'), false, 'server running state should remove pending-send styling');
+
+const runningBaselineContext = createContext();
+runningBaselineContext.dispatchAction = async () => true;
+runningBaselineContext.getCurrentSession = () => ({
+  archived: false,
+  activity: {
+    run: { state: 'running', phase: 'running', runId: 'run_existing' },
+    queue: { state: 'idle', count: 0 },
+  },
+});
+vm.runInNewContext(composeSource, runningBaselineContext, { filename: 'static/chat/compose.js' });
+runningBaselineContext.msgInput.value = 'queue behind the current run';
+runningBaselineContext.saveDraft();
+runningBaselineContext.sendMessage();
+await Promise.resolve();
+runningBaselineContext.reconcileComposerPendingSendWithSession({
+  id: 'session-a',
+  activity: {
+    run: { state: 'running', phase: 'running', runId: 'run_existing' },
+    queue: { state: 'idle', count: 0 },
+  },
+});
+assert.equal(runningBaselineContext.msgInput.readOnly, true, 'an already-running session should not clear a new pending send until the queue confirmation arrives');
+runningBaselineContext.reconcileComposerPendingSendWithSession({
+  id: 'session-a',
+  activity: {
+    run: { state: 'running', phase: 'running', runId: 'run_existing' },
+    queue: { state: 'queued', count: 1 },
+  },
+});
+assert.equal(runningBaselineContext.msgInput.value, '', 'queue confirmation should clear the pending composer state for follow-up sends');
+assert.equal(runningBaselineContext.msgInput.readOnly, false, 'queue confirmation should unlock the composer for another follow-up');
+
 const failedSendContext = createContext();
 failedSendContext.dispatchAction = async () => true;
 vm.runInNewContext(composeSource, failedSendContext, { filename: 'static/chat/compose.js' });

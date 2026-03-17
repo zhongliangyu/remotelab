@@ -50,11 +50,70 @@ function finalizeComposerPendingSend(requestId) {
   return true;
 }
 
+function createEmptyComposerActivitySnapshot() {
+  return {
+    run: {
+      state: "idle",
+      phase: null,
+      runId: null,
+    },
+    queue: {
+      state: "idle",
+      count: 0,
+    },
+  };
+}
+
+function getComposerSessionActivitySnapshot(session) {
+  const raw = session?.activity || {};
+  const queueCount = Number.isInteger(raw?.queue?.count) ? raw.queue.count : 0;
+  return {
+    run: {
+      state: raw?.run?.state === "running" ? "running" : "idle",
+      phase: typeof raw?.run?.phase === "string" ? raw.run.phase : null,
+      runId: typeof raw?.run?.runId === "string" ? raw.run.runId : null,
+    },
+    queue: {
+      state: raw?.queue?.state === "queued" && queueCount > 0 ? "queued" : "idle",
+      count: queueCount,
+    },
+  };
+}
+
+function hasCanonicalComposerSendAcceptance(session) {
+  if (!pendingComposerSend) return false;
+  if (!session?.id || session.id !== pendingComposerSend.sessionId) return false;
+
+  const queuedMessages = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
+  if (queuedMessages.some((item) => item?.requestId === pendingComposerSend.requestId)) {
+    return true;
+  }
+
+  const previousActivity = pendingComposerSend.baselineActivity || createEmptyComposerActivitySnapshot();
+  const nextActivity = getComposerSessionActivitySnapshot(session);
+
+  if (
+    nextActivity.queue.state === "queued"
+    && nextActivity.queue.count > (previousActivity.queue?.count || 0)
+  ) {
+    return true;
+  }
+
+  if (previousActivity.run.state !== "running") {
+    if (nextActivity.run.state === "running") return true;
+    if (nextActivity.run.phase === "accepted" || nextActivity.run.phase === "running") return true;
+    if (nextActivity.run.runId && nextActivity.run.runId !== (previousActivity.run?.runId || null)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function reconcileComposerPendingSendWithSession(session) {
   if (!pendingComposerSend) return false;
   if (!session?.id || session.id !== pendingComposerSend.sessionId) return false;
-  const queuedMessages = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
-  if (!queuedMessages.some((item) => item?.requestId === pendingComposerSend.requestId)) return false;
+  if (!hasCanonicalComposerSendAcceptance(session)) return false;
   return finalizeComposerPendingSend(pendingComposerSend.requestId);
 }
 
@@ -109,6 +168,7 @@ function sendMessage(existingRequestId) {
     requestId,
     text,
     images: queuedImages,
+    baselineActivity: getComposerSessionActivitySnapshot(currentSession),
   };
   clearDraft(sessionId);
   syncComposerPendingUi();

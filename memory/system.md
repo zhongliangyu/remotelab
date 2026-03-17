@@ -182,6 +182,11 @@ Universal learnings and patterns that apply to all RemoteLab deployments, regard
 - When a send starts, clear the persisted draft immediately and keep the temporary "sending" copy only in memory for the active page.
 - Otherwise a reload can resurrect text that the server already accepted, making the composer look stuck in a duplicate sending state.
 
+### Composer Sending Must Yield To Canonical Session Activity (2026-03-17)
+- Treat the local composer `sending` state as a very short pre-ack phase only, not a peer to the backend session activity model.
+- Once the backend session activity shows the message has been accepted into real work — for example a new run starts, the run phase reaches `accepted`, or the follow-up queue count increases — clear the local sending lock immediately.
+- Otherwise the UI can show contradictory states like `running` in the header while the composer still looks frozen in `sending`.
+
 ### Connector App Scopes Should Be Real Apps, Not Chat Aliases (2026-03-12)
 - If an integration like Email creates sessions with its own `appId`, ship a real built-in app entry for that scope so the UI can present it consistently instead of feeling like an unnamed Chat fallback.
 - Mark connector built-ins as non-template apps, and hide them from the sidebar when they have zero sessions; otherwise they clutter owner-facing app/template controls while still failing to model the connector cleanly.
