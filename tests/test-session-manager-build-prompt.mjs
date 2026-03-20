@@ -53,6 +53,7 @@ assert.match(freshPrompt, /User message:/);
 assert.match(freshPrompt, /do not mirror its headings, bullets, or checklist structure back to the user/);
 assert.match(freshPrompt, /active working agreements/);
 assert.match(freshPrompt, /默认用自然连贯的段落表达，不要自己起标题和列表/);
+assert.match(freshPrompt, /route or split first/);
 
 const resumedPrompt = await buildPrompt(
   'session-test-1',
@@ -71,6 +72,23 @@ assert.match(resumedPrompt, /<private>[\s\S]*Manager note: RemoteLab remains the
 assert.match(resumedPrompt, /Current user message:/);
 assert.doesNotMatch(resumedPrompt, /Memory System — Pointer-First Activation/);
 assert.match(resumedPrompt, /Agent 更像执行器，Manager 负责统一任务语义和边界/);
+
+const splitPrompt = await buildPrompt(
+  'session-test-6',
+  baseSession,
+  `现在手上都有哪些任务，我觉得需要关注两点：
+1. 现在都积压了哪些任务，我们看下接下来做什么
+2. 我们的 TODO 记录是标准流程吗，需不需要做一个定型？`,
+  'codex',
+  'codex',
+  null,
+  { skipSessionContinuation: true },
+);
+
+assert.match(splitPrompt, /High-priority routing hint for this turn/);
+assert.match(splitPrompt, /spawn one focused child session per workstream/);
+assert.match(splitPrompt, /1\. 现在都积压了哪些任务，我们看下接下来做什么/);
+assert.match(splitPrompt, /2\. 我们的 TODO 记录是标准流程吗，需不需要做一个定型/);
 
 const feishuSourcePrompt = await buildPrompt(
   'session-test-3',
