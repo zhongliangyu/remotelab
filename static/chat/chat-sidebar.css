@@ -519,6 +519,27 @@
 .settings-app-empty.inline-status {
   margin-top: 8px;
 }
+.voice-input-diagnostics-summary {
+  margin-top: 8px;
+}
+.voice-input-diagnostics-actions {
+  margin-top: 0;
+}
+.voice-input-diagnostics {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
 .settings-app-editor {
   display: grid;
   gap: 8px;
@@ -693,4 +714,3 @@
   cursor: pointer; border-radius: 6px; margin-top: 2px; font-family: inherit;
 }
 .ac-suggestions button:hover { background: var(--bg-tertiary); }
-

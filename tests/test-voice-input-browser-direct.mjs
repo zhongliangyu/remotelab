@@ -101,6 +101,18 @@ class MockRecognition {
   }
 }
 
+function findByClassName(node, expectedClass, matches = []) {
+  if (!node || typeof node !== 'object') return matches;
+  const className = String(node.className || '');
+  if (className.split(/\s+/).includes(expectedClass)) {
+    matches.push(node);
+  }
+  for (const child of node.children || []) {
+    findByClassName(child, expectedClass, matches);
+  }
+  return matches;
+}
+
 const elements = new Map();
 for (const id of ['voiceInputBtn', 'voiceFileInput', 'voiceInputStatus', 'voiceSettingsMount', 'msgInput']) {
   elements.set(id, createElement(id));
@@ -208,6 +220,13 @@ vm.runInNewContext(
 
 await new Promise((resolve) => setTimeout(resolve, 0));
 
+assert.equal(typeof context.window.RemoteLabVoiceInput.getDiagnosticsText, 'function', 'diagnostics helper should be exposed');
+assert.match(context.window.RemoteLabVoiceInput.getDiagnosticsText(), /Voice diagnostics initialized/, 'diagnostics should bootstrap immediately');
+
+const diagnosticsPanels = findByClassName(elements.get('voiceSettingsMount'), 'voice-input-diagnostics');
+assert.equal(diagnosticsPanels.length, 1, 'settings should render the diagnostics panel');
+assert.match(diagnosticsPanels[0].textContent, /Loaded voice input config/, 'diagnostics panel should show recent events');
+
 await context.handleVoiceInputClick();
 assert.equal(MockRecognition.instance.started, true, 'browser direct recognition should start');
 
@@ -229,6 +248,8 @@ assert.equal(submitCall.options.method, 'POST');
 assert.equal(submitCall.options.headers['Content-Type'], 'application/json');
 assert.equal(JSON.parse(submitCall.options.body).providedTranscript, '实时字幕测试');
 assert.equal(context.sendMessageCalls, 1, 'empty composer + auto-send should trigger sendMessage');
+assert.match(context.window.RemoteLabVoiceInput.getDiagnosticsText(), /Browser direct start requested/, 'browser direct start should be logged');
+assert.match(context.window.RemoteLabVoiceInput.getDiagnosticsText(), /Voice submit completed/, 'final voice submission should be logged');
 
 voiceInputConfig = {
   enabled: true,
