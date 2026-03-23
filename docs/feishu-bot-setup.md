@@ -117,7 +117,7 @@ Notes:
   "sessionTool": "codex",
   "processingReaction": {
     "enabled": true,
-    "emojiType": "FINGERHEART",
+    "emojiType": "WRONGED",
     "removeOnCompletion": false
   },
   "silentConfirmationText": "",
@@ -132,8 +132,8 @@ Notes:
 - use `feishu-cn` for `open.feishu.cn`
 - use `lark-global` for `open.larksuite.com`
 - omit `sessionFolder` to use the operator's home directory by default
-- `processingReaction` lets the bot add a quick reaction on the user's message before the real reply lands; by default it uses `FINGERHEART` and stays attached after the reply as a lightweight ack marker
-- `emojiType` must be one of Feishu's reaction emoji types such as `FINGERHEART`, `GLANCE`, `THINKING`, or `SMILE`
+- `processingReaction` lets the bot add a quick reaction on the user's message before the real reply lands; by default it uses `WRONGED` and stays attached after the reply as a lightweight ack marker
+- `emojiType` must be one of Feishu's reaction emoji types such as `WRONGED`, `FINGERHEART`, `GLANCE`, `THINKING`, or `SMILE`; in Feishu's official reaction enum the closest built-in name for the `委屈` style is `WRONGED`, not `HURT`
 - `silentConfirmationText` lets the connector send a tiny text acknowledgement when the assistant would otherwise stay silent; this is useful for Feishu-style emoticon tokens like `[委屈]`
 - set `removeOnCompletion` to `true` only if you want the reaction to be temporary
 - the connector forwards mostly the rendered user message plus mention-token hints, not a large blob of transport metadata

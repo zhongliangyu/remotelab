@@ -423,14 +423,19 @@ assert.equal(loadedConfig.systemPrompt, '', 'default config should rely on backe
 assert.equal(loadedConfig.runtimeSelectionMode, 'ui');
 assert.deepEqual(loadedConfig.processingReaction, {
   enabled: false,
-  emojiType: 'FINGERHEART',
+  emojiType: 'WRONGED',
   removeOnCompletion: false,
 }, 'processing reactions should default to disabled');
 assert.equal(loadedConfig.silentConfirmationText, '', 'silent confirmations should default to disabled');
 
 assert.deepEqual(normalizeProcessingReactionConfig(true), {
   enabled: true,
-  emojiType: 'FINGERHEART',
+  emojiType: 'WRONGED',
+  removeOnCompletion: false,
+});
+assert.deepEqual(normalizeProcessingReactionConfig('wronged'), {
+  enabled: true,
+  emojiType: 'WRONGED',
   removeOnCompletion: false,
 });
 assert.deepEqual(normalizeProcessingReactionConfig('fingerheart'), {
