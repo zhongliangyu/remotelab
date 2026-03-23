@@ -450,29 +450,29 @@ assert.equal(loadedConfig.runtimeSelectionMode, 'ui');
 assert.deepEqual(loadedConfig.processingReaction, {
   enabled: false,
   emojiType: 'THINKING',
-  removeOnCompletion: true,
+  removeOnCompletion: false,
 }, 'processing reactions should default to disabled');
 assert.equal(loadedConfig.silentConfirmationText, '', 'silent confirmations should default to disabled');
 
 assert.deepEqual(normalizeProcessingReactionConfig(true), {
   enabled: true,
   emojiType: 'THINKING',
-  removeOnCompletion: true,
+  removeOnCompletion: false,
 });
 assert.deepEqual(normalizeProcessingReactionConfig('wronged'), {
   enabled: true,
   emojiType: 'WRONGED',
-  removeOnCompletion: true,
+  removeOnCompletion: false,
 });
 assert.deepEqual(normalizeProcessingReactionConfig('fingerheart'), {
   enabled: true,
   emojiType: 'FINGERHEART',
-  removeOnCompletion: true,
+  removeOnCompletion: false,
 });
 assert.deepEqual(normalizeProcessingReactionConfig('thinking'), {
   enabled: true,
   emojiType: 'THINKING',
-  removeOnCompletion: true,
+  removeOnCompletion: false,
 });
 assert.deepEqual(normalizeProcessingReactionConfig({
   enabled: true,

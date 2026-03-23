@@ -130,7 +130,7 @@ Config shape:
     "processingReaction": {
       "enabled": false,
       "emojiType": "${DEFAULT_PROCESSING_REACTION_EMOJI_TYPE}",
-      "removeOnCompletion": true
+      "removeOnCompletion": false
     },
     "silentConfirmationText": "",
     "intakePolicy": {
@@ -348,27 +348,27 @@ function normalizeProcessingReactionConfig(value) {
     return {
       enabled: true,
       emojiType: DEFAULT_PROCESSING_REACTION_EMOJI_TYPE,
-      removeOnCompletion: true,
+      removeOnCompletion: false,
     };
   }
   if (value === false) {
     return {
       enabled: false,
       emojiType: DEFAULT_PROCESSING_REACTION_EMOJI_TYPE,
-      removeOnCompletion: true,
+      removeOnCompletion: false,
     };
   }
   if (typeof value === 'string') {
     return {
       enabled: true,
       emojiType: normalizeReactionEmojiType(value),
-      removeOnCompletion: true,
+      removeOnCompletion: false,
     };
   }
   return {
     enabled: normalizeBoolean(value?.enabled, false),
     emojiType: normalizeReactionEmojiType(value?.emojiType),
-    removeOnCompletion: normalizeBoolean(value?.removeOnCompletion, true),
+    removeOnCompletion: normalizeBoolean(value?.removeOnCompletion, false),
   };
 }
 
