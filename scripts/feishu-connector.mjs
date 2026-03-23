@@ -1238,6 +1238,119 @@ async function requestRemoteLab(runtime, path, options = {}) {
   return result;
 }
 
+async function loadRemoteLabSession(runtime, sessionId) {
+  const result = await requestRemoteLab(runtime, `/api/sessions/${sessionId}`);
+  if (!result.response.ok || !result.json?.session) {
+    throw new Error(result.json?.error || result.text || `Failed to load session ${sessionId}`);
+  }
+  return result.json.session;
+}
+
+function getRemoteLabSessionQueueCount(session) {
+  return Number.isInteger(session?.activity?.queue?.count) ? session.activity.queue.count : 0;
+}
+
+function isRemoteLabSessionBusy(session) {
+  return trimString(session?.activity?.run?.state).toLowerCase() === 'running'
+    || trimString(session?.activity?.compact?.state).toLowerCase() === 'pending'
+    || getRemoteLabSessionQueueCount(session) > 0;
+}
+
+async function waitForSessionReady(runtime, sessionId, initialSession = null) {
+  const deadline = Date.now() + RUN_POLL_TIMEOUT_MS;
+  let session = initialSession
+    && initialSession.id === sessionId
+    && initialSession.activity
+    ? initialSession
+    : null;
+  while (Date.now() < deadline) {
+    if (!session) {
+      session = await loadRemoteLabSession(runtime, sessionId);
+    }
+    if (!isRemoteLabSessionBusy(session)) {
+      return session;
+    }
+    await delay(RUN_POLL_INTERVAL_MS);
+    session = null;
+  }
+  throw new Error(`session ${sessionId} remained busy after ${RUN_POLL_TIMEOUT_MS}ms`);
+}
+
+async function loadRemoteLabEvents(runtime, sessionId) {
+  const result = await requestRemoteLab(runtime, `/api/sessions/${sessionId}/events?filter=all`);
+  if (!result.response.ok || !Array.isArray(result.json?.events)) {
+    throw new Error(result.json?.error || result.text || `Failed to load session events for ${sessionId}`);
+  }
+  return result.json.events;
+}
+
+function sourceContextReferencesRequest(sourceContext, requestId, messageId) {
+  if (!sourceContext || typeof sourceContext !== 'object' || Array.isArray(sourceContext)) {
+    return false;
+  }
+
+  const normalizedRequestId = trimString(requestId);
+  const normalizedMessageId = trimString(messageId);
+  if (normalizedRequestId && trimString(sourceContext.requestId) === normalizedRequestId) {
+    return true;
+  }
+  if (normalizedMessageId && trimString(sourceContext.messageId) === normalizedMessageId) {
+    return true;
+  }
+
+  if (!Array.isArray(sourceContext.queuedMessages)) {
+    return false;
+  }
+
+  return sourceContext.queuedMessages.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    if (normalizedRequestId && trimString(entry.requestId) === normalizedRequestId) {
+      return true;
+    }
+    return sourceContextReferencesRequest(entry.sourceContext, normalizedRequestId, normalizedMessageId);
+  });
+}
+
+function findQueuedRequestRunId(events, { requestId, messageId, sinceSeq = 0 } = {}) {
+  const normalizedRequestId = trimString(requestId);
+  const normalizedMessageId = trimString(messageId);
+
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || event.type !== 'message' || event.role !== 'user') {
+      continue;
+    }
+    if (Number.isInteger(sinceSeq) && Number.isInteger(event.seq) && event.seq <= sinceSeq) {
+      continue;
+    }
+
+    const runId = trimString(event.runId);
+    if (!runId) {
+      continue;
+    }
+    if (normalizedRequestId && trimString(event.requestId) === normalizedRequestId) {
+      return runId;
+    }
+    if (sourceContextReferencesRequest(event.sourceContext, normalizedRequestId, normalizedMessageId)) {
+      return runId;
+    }
+  }
+
+  return '';
+}
+
+async function waitForQueuedRequestRun(runtime, sessionId, match = {}) {
+  const deadline = Date.now() + RUN_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const events = await loadRemoteLabEvents(runtime, sessionId);
+    const runId = findQueuedRequestRunId(events, match);
+    if (runId) {
+      return runId;
+    }
+    await delay(RUN_POLL_INTERVAL_MS);
+  }
+  throw new Error(`queued request timed out after ${RUN_POLL_TIMEOUT_MS}ms`);
+}
+
 async function createOrReuseSession(runtime, summary, runtimeSelection) {
   const sourceName = runtime.config.region === 'lark-global' ? 'Lark' : 'Feishu';
   const payload = {
@@ -1279,14 +1392,17 @@ async function submitRemoteLabMessage(runtime, sessionId, summary, runtimeSelect
     method: 'POST',
     body: payload,
   });
-  if (![200, 202].includes(result.response.status) || !result.json?.run?.id) {
+  const queued = result.json?.queued === true;
+  const runId = trimString(result.json?.run?.id);
+  if (![200, 202].includes(result.response.status) || (!runId && !queued)) {
     throw new Error(result.json?.error || result.text || `Failed to submit session message (${result.response.status})`);
   }
 
   return {
     requestId: payload.requestId,
-    runId: result.json.run.id,
+    runId: runId || null,
     duplicate: result.json?.duplicate === true,
+    queued,
   };
 }
 
@@ -1327,20 +1443,31 @@ async function resolveFeishuRuntimeSelection(runtime) {
 async function generateRemoteLabReply(runtime, summary) {
   const runtimeSelection = await resolveFeishuRuntimeSelection(runtime);
   const session = await createOrReuseSession(runtime, summary, runtimeSelection);
+  const readySession = await waitForSessionReady(runtime, session.id, session);
+  const baselineSeq = Number.isInteger(readySession?.latestSeq) ? readySession.latestSeq : 0;
   const submission = await submitRemoteLabMessage(runtime, session.id, summary, runtimeSelection);
-  await waitForRunCompletion(runtime, submission.runId);
+  let runId = submission.runId;
+  if (!runId && submission.queued) {
+    runId = await waitForQueuedRequestRun(runtime, session.id, {
+      requestId: submission.requestId,
+      messageId: summary.messageId,
+      sinceSeq: baselineSeq,
+    });
+  }
+  await waitForRunCompletion(runtime, runId);
   const replyEvent = await loadAssistantReply(
     (path) => requestRemoteLab(runtime, path),
     session.id,
-    submission.runId,
+    runId,
     submission.requestId,
   );
   const replyText = normalizeReplyText(replyEvent?.content);
   return {
     sessionId: session.id,
-    runId: submission.runId,
+    runId,
     requestId: submission.requestId,
     duplicate: submission.duplicate,
+    queued: submission.queued,
     replyText,
     silent: !replyText,
   };

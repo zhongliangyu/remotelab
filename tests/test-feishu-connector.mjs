@@ -655,6 +655,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/api/sessions/sess_feishu_1') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: {
+        id: 'sess_feishu_1',
+        latestSeq: 1,
+        activity: {
+          run: { state: 'idle' },
+          queue: { count: 0 },
+          compact: { state: 'idle' },
+        },
+      },
+    }));
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/sessions/sess_feishu_1/messages') {
     submittedPayload = JSON.parse(body || '{}');
     res.writeHead(202, { 'Content-Type': 'application/json' });
@@ -744,6 +760,153 @@ try {
   await rm(tempHome, { recursive: true, force: true });
 }
 
+let queuedSubmittedPayload = null;
+const queuedServer = http.createServer(async (req, res) => {
+  let body = '';
+  req.on('data', (chunk) => {
+    body += chunk.toString();
+  });
+  await new Promise((resolve) => req.on('end', resolve));
+
+  if (req.method === 'POST' && req.url === '/api/sessions') {
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: {
+        id: 'sess_feishu_queued_1',
+        latestSeq: 7,
+        activity: {
+          run: { state: 'idle' },
+          queue: { count: 0 },
+          compact: { state: 'idle' },
+        },
+      },
+    }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/sessions/sess_feishu_queued_1') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: {
+        id: 'sess_feishu_queued_1',
+        latestSeq: 7,
+        activity: {
+          run: { state: 'idle' },
+          queue: { count: 0 },
+          compact: { state: 'idle' },
+        },
+      },
+    }));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/sessions/sess_feishu_queued_1/messages') {
+    queuedSubmittedPayload = JSON.parse(body || '{}');
+    res.writeHead(202, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      queued: true,
+      run: null,
+      session: {
+        id: 'sess_feishu_queued_1',
+        activity: {
+          run: { state: 'running' },
+          queue: { count: 1 },
+          compact: { state: 'idle' },
+        },
+      },
+    }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/sessions/sess_feishu_queued_1/events?filter=all') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      events: [
+        {
+          seq: 8,
+          type: 'message',
+          role: 'user',
+          runId: 'run_feishu_queued_1',
+          requestId: 'queued_batch_internal',
+          sourceContext: {
+            queuedMessages: [{
+              requestId: 'feishu:msg_queued_scope',
+              sourceContext: {
+                connector: 'feishu',
+                messageId: 'msg_queued_scope',
+                chatType: 'group',
+              },
+            }],
+          },
+        },
+      ],
+    }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/runs/run_feishu_queued_1') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ run: { id: 'run_feishu_queued_1', state: 'completed' } }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/sessions/sess_feishu_queued_1/events') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      events: [{
+        seq: 9,
+        type: 'message',
+        role: 'assistant',
+        runId: 'run_feishu_queued_1',
+        requestId: 'queued_batch_internal',
+        content: 'Queued reply is ready now.',
+      }],
+    }));
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
+
+await new Promise((resolve) => queuedServer.listen(0, '127.0.0.1', resolve));
+
+try {
+  const address = queuedServer.address();
+  await saveUiRuntimeSelection({
+    selectedTool: 'codex',
+    selectedModel: '',
+    thinkingEnabled: false,
+  });
+  const reply = await generateRemoteLabReply(
+    {
+      authCookie: 'session_token=test-cookie',
+      authToken: 'ignored',
+      config: {
+        chatBaseUrl: `http://127.0.0.1:${address.port}`,
+        sessionFolder: repoRoot,
+        sessionTool: 'codex',
+        systemPrompt: 'Reply with plain text only.',
+      },
+    },
+    {
+      chatType: 'group',
+      chatId: 'chat_queued_scope',
+      messageId: 'msg_queued_scope',
+      textPreview: 'Please wait until the queued reply is actually ready.',
+      sender: { openId: 'ou_scope_test_queued' },
+    },
+  );
+
+  assert.equal(queuedSubmittedPayload?.requestId, 'feishu:msg_queued_scope');
+  assert.equal(reply.sessionId, 'sess_feishu_queued_1');
+  assert.equal(reply.runId, 'run_feishu_queued_1');
+  assert.equal(reply.queued, true);
+  assert.equal(reply.replyText, 'Queued reply is ready now.');
+} finally {
+  await new Promise((resolve) => queuedServer.close(resolve));
+}
+
 console.log('ok - empty assistant replies stay silent');
 console.log('ok - processing reactions bracket delayed Feishu replies');
 console.log('ok - non-text Feishu payloads are summarized and ignored silently');
@@ -752,3 +915,4 @@ console.log('ok - whitelist file reloads without restart');
 console.log('ok - local group approval commands persist approved chats');
 console.log('ok - approved chats auto-grant newly joined members');
 console.log('ok - generated Feishu sessions use the feishu app scope');
+console.log('ok - queued Feishu follow-ups wait for the eventual assistant reply');
