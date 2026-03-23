@@ -43,43 +43,43 @@ function extractFunctionSource(source, functionName) {
   throw new Error(`Unable to extract ${functionName}`);
 }
 
-const createNewAppShortcutSource = extractFunctionSource(sidebarUiSource, 'createNewAppShortcut');
+const createSortSessionListShortcutSource = extractFunctionSource(sidebarUiSource, 'createSortSessionListShortcut');
 
-function createHarness({ focusResult = true } = {}) {
+function createHarness({ organizeResult = true } = {}) {
   const state = {
-    focusCalls: [],
+    organizeCalls: [],
   };
   const context = {
     console,
-    focusNewAppComposer(options) {
-      state.focusCalls.push(options);
-      return focusResult;
+    organizeSessionListWithAgent(options) {
+      state.organizeCalls.push(options);
+      return organizeResult;
     },
   };
   context.globalThis = context;
-  vm.runInNewContext(`${createNewAppShortcutSource}
-globalThis.createNewAppShortcut = createNewAppShortcut;`, context, {
+  vm.runInNewContext(`${createSortSessionListShortcutSource}
+globalThis.createSortSessionListShortcut = createSortSessionListShortcut;`, context, {
     filename: 'static/chat/sidebar-ui.js',
   });
   return { context, state };
 }
 
 const successHarness = createHarness();
-const successResult = successHarness.context.createNewAppShortcut();
-assert.equal(successResult, true, 'new app shortcut should return the settings focus result');
+const successResult = successHarness.context.createSortSessionListShortcut();
+assert.equal(successResult, true, 'sort list shortcut should return the organizer trigger result');
 assert.equal(
-  JSON.stringify(successHarness.state.focusCalls),
-  JSON.stringify([{ closeSidebar: true }]),
-  'new app shortcut should open the settings-side app composer instead of creating a chat session',
+  JSON.stringify(successHarness.state.organizeCalls),
+  JSON.stringify([{ closeSidebar: false }]),
+  'sort list shortcut should trigger the hidden organizer flow without closing the sidebar',
 );
 
-const missingHarness = createHarness({ focusResult: false });
-const missingResult = missingHarness.context.createNewAppShortcut();
-assert.equal(missingResult, false, 'new app shortcut should fail cleanly when the settings focus fails');
+const missingHarness = createHarness({ organizeResult: false });
+const missingResult = missingHarness.context.createSortSessionListShortcut();
+assert.equal(missingResult, false, 'sort list shortcut should fail cleanly when the organizer trigger fails');
 assert.equal(
-  JSON.stringify(missingHarness.state.focusCalls),
-  JSON.stringify([{ closeSidebar: true }]),
-  'new app shortcut should delegate to the settings composer even on failure',
+  JSON.stringify(missingHarness.state.organizeCalls),
+  JSON.stringify([{ closeSidebar: false }]),
+  'sort list shortcut should still delegate to the organizer helper on failure',
 );
 
-console.log('test-chat-new-app-shortcut: ok');
+console.log('test-chat-sort-list-shortcut: ok');

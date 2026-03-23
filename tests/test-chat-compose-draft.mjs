@@ -187,7 +187,7 @@ function createContext({
     tabBoard: makeEventTarget(),
     tabSettings: makeEventTarget(),
     sessionListFooter: makeEventTarget(),
-    newAppBtn: makeEventTarget(),
+    sortSessionListBtn: makeEventTarget(),
     newSessionBtn: makeEventTarget(),
     boardPanel: {
       classList: {

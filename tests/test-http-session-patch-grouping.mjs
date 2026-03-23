@@ -128,17 +128,24 @@ try {
   });
   assert.equal(invalidGroup.status, 400, 'invalid group type should be rejected');
 
+  const invalidSidebarOrder = await request(port, 'PATCH', `/api/sessions/${sessionId}`, {
+    sidebarOrder: 0,
+  });
+  assert.equal(invalidSidebarOrder.status, 400, 'invalid sidebar order should be rejected');
+
   const patched = await request(port, 'PATCH', `/api/sessions/${sessionId}`, {
     group: '  RemoteLab  ',
     description: '  Board-driven orchestration work.  ',
+    sidebarOrder: 4,
   });
-  assert.equal(patched.status, 200, 'session patch should accept group and description');
+  assert.equal(patched.status, 200, 'session patch should accept group, description, and sidebar order');
   assert.equal(patched.json.session.group, 'RemoteLab', 'patch should trim and persist group');
   assert.equal(
     patched.json.session.description,
     'Board-driven orchestration work.',
     'patch should trim and persist description',
   );
+  assert.equal(patched.json.session.sidebarOrder, 4, 'patch should persist sidebar order');
 
   const detail = await request(port, 'GET', `/api/sessions/${sessionId}`);
   assert.equal(detail.status, 200, 'detail route should succeed after patch');
@@ -148,6 +155,7 @@ try {
     'Board-driven orchestration work.',
     'detail route should expose patched description',
   );
+  assert.equal(detail.json.session.sidebarOrder, 4, 'detail route should expose patched sidebar order');
 
   const listed = await request(port, 'GET', '/api/sessions');
   assert.equal(listed.status, 200, 'session list should succeed');
@@ -159,14 +167,17 @@ try {
     'Board-driven orchestration work.',
     'session list should expose patched description',
   );
+  assert.equal(listedSession.sidebarOrder, 4, 'session list should expose patched sidebar order');
 
   const cleared = await request(port, 'PATCH', `/api/sessions/${sessionId}`, {
     group: null,
     description: '',
+    sidebarOrder: null,
   });
-  assert.equal(cleared.status, 200, 'patch should accept clearing group and description');
+  assert.equal(cleared.status, 200, 'patch should accept clearing group, description, and sidebar order');
   assert.equal(cleared.json.session.group, undefined, 'patch should clear group');
   assert.equal(cleared.json.session.description, undefined, 'patch should clear description');
+  assert.equal(cleared.json.session.sidebarOrder, undefined, 'patch should clear sidebar order');
 
   console.log('test-http-session-patch-grouping: ok');
 } finally {

@@ -210,7 +210,7 @@ async function main() {
     assert.match(page.text, /id="sourceFilterSelect"/);
     assert.match(page.text, /id="sessionAppFilterSelect"/);
     assert.match(page.text, /id="userFilterSelect"/);
-    assert.match(page.text, /id="newAppBtn"/);
+    assert.match(page.text, /id="sortSessionListBtn"/);
     assert.match(page.text, /id="settingsAppsList"/);
     assert.match(page.text, /id="tabBoard"/);
     assert.match(page.text, /id="boardPanel"/);

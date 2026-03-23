@@ -52,6 +52,95 @@ function notifyCompletion(session) {
   };
 }
 
+const SESSION_LIST_ORGANIZER_POLL_INTERVAL_MS = 1200;
+const SESSION_LIST_ORGANIZER_POLL_TIMEOUT_MS = 90 * 1000;
+const DEFAULT_SORT_SESSION_LIST_BUTTON_LABEL = "Sort List";
+let sessionListOrganizerInFlight = null;
+let sessionListOrganizerLabelResetTimer = null;
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function setSortSessionListButtonState(label = DEFAULT_SORT_SESSION_LIST_BUTTON_LABEL, { busy = false } = {}) {
+  if (!sortSessionListBtn) return;
+  sortSessionListBtn.textContent = label || DEFAULT_SORT_SESSION_LIST_BUTTON_LABEL;
+  sortSessionListBtn.disabled = busy;
+}
+
+function clipSessionListOrganizerText(value, maxChars = 240) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
+    : normalized;
+}
+
+function scheduleSortSessionListButtonReset(delayMs = 1600) {
+  if (sessionListOrganizerLabelResetTimer) {
+    window.clearTimeout(sessionListOrganizerLabelResetTimer);
+  }
+  sessionListOrganizerLabelResetTimer = window.setTimeout(() => {
+    sessionListOrganizerLabelResetTimer = null;
+    setSortSessionListButtonState(DEFAULT_SORT_SESSION_LIST_BUTTON_LABEL, { busy: false });
+  }, delayMs);
+}
+
+function buildSessionListOrganizerSessionMetadata(session) {
+  const brief = typeof session?.description === "string"
+    ? session.description.trim()
+    : "";
+  return {
+    id: session?.id || "",
+    title: clipSessionListOrganizerText(getSessionDisplayName(session), 160),
+    brief: clipSessionListOrganizerText(brief, 280),
+    currentGroup: typeof session?.group === "string" && session.group.trim()
+      ? clipSessionListOrganizerText(session.group, 80)
+      : null,
+    currentSidebarOrder: Number.isInteger(session?.sidebarOrder) && session.sidebarOrder > 0
+      ? session.sidebarOrder
+      : null,
+    pinned: session?.pinned === true,
+    tool: clipSessionListOrganizerText(session?.tool || "", 40),
+    appName: clipSessionListOrganizerText(session?.appName || "", 80),
+    sourceName: clipSessionListOrganizerText(session?.sourceName || "", 80),
+    userName: clipSessionListOrganizerText(session?.userName || "", 80),
+    folder: clipSessionListOrganizerText(session?.folder || "", 180),
+    workflowState: clipSessionListOrganizerText(session?.workflowState || "", 40),
+    workflowPriority: clipSessionListOrganizerText(session?.workflowPriority || "", 40),
+    messageCount: Number.isInteger(session?.messageCount) ? session.messageCount : 0,
+    created: clipSessionListOrganizerText(session?.created || "", 40),
+    updatedAt: clipSessionListOrganizerText(session?.updatedAt || "", 40),
+    lastEventAt: clipSessionListOrganizerText(session?.lastEventAt || "", 40),
+  };
+}
+
+function buildSessionListOrganizerPayload() {
+  const activeSessions = getActiveSessions();
+  return {
+    tool: selectedTool || preferredTool || "codex",
+    ...(selectedModel ? { model: selectedModel } : {}),
+    ...(selectedEffort ? { effort: selectedEffort } : {}),
+    thinking: thinkingEnabled === true,
+    sessions: activeSessions.map(buildSessionListOrganizerSessionMetadata).filter((session) => session.id),
+  };
+}
+
+async function waitForSessionListOrganizerRun(runId) {
+  const deadline = Date.now() + SESSION_LIST_ORGANIZER_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const data = await fetchJsonOrRedirect(`/api/runs/${encodeURIComponent(runId)}`, {
+      revalidate: false,
+    });
+    const state = typeof data?.run?.state === "string" ? data.run.state : "";
+    if (["completed", "failed", "cancelled"].includes(state)) {
+      return data.run || null;
+    }
+    await sleep(SESSION_LIST_ORGANIZER_POLL_INTERVAL_MS);
+  }
+  throw new Error("Timed out while sorting the session list");
+}
+
 
 function getSessionRunState(session) {
   return session?.activity?.run?.state === "running" ? "running" : "idle";
@@ -443,6 +532,61 @@ async function fetchSessionsList() {
     archivedCount: Number.isInteger(data.archivedCount) ? data.archivedCount : 0,
   });
   return sessions;
+}
+
+async function organizeSessionListWithAgent({ closeSidebar = false } = {}) {
+  if (visitorMode) return false;
+  if (sessionListOrganizerInFlight) return sessionListOrganizerInFlight;
+
+  const payload = buildSessionListOrganizerPayload();
+  if (!Array.isArray(payload.sessions) || payload.sessions.length === 0) {
+    setSortSessionListButtonState("Nothing to sort", { busy: false });
+    scheduleSortSessionListButtonReset();
+    return false;
+  }
+
+  if (sessionListOrganizerLabelResetTimer) {
+    window.clearTimeout(sessionListOrganizerLabelResetTimer);
+    sessionListOrganizerLabelResetTimer = null;
+  }
+  setSortSessionListButtonState("Sorting…", { busy: true });
+
+  const request = (async () => {
+    try {
+      const data = await fetchJsonOrRedirect("/api/session-list/organize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (data?.skipped) {
+        setSortSessionListButtonState("Nothing to sort", { busy: false });
+        return true;
+      }
+      const runId = typeof data?.run?.id === "string" ? data.run.id.trim() : "";
+      if (runId) {
+        const run = await waitForSessionListOrganizerRun(runId);
+        if (run?.state !== "completed") {
+          throw new Error(run?.failureReason || `Sort list ${run?.state || "failed"}`);
+        }
+      }
+      await fetchSessionsList();
+      if (closeSidebar && !isDesktop) {
+        closeSidebarFn();
+      }
+      setSortSessionListButtonState("Sorted", { busy: false });
+      return true;
+    } catch (error) {
+      console.warn("[sessions] Failed to organize the session list:", error.message);
+      setSortSessionListButtonState("Sort failed", { busy: false });
+      return false;
+    } finally {
+      sessionListOrganizerInFlight = null;
+      scheduleSortSessionListButtonReset();
+    }
+  })();
+
+  sessionListOrganizerInFlight = request;
+  return request;
 }
 
 function applyAttachedSessionState(id, session) {

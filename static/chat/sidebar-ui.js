@@ -22,8 +22,8 @@ function createNewSessionShortcut({ closeSidebar = true } = {}) {
   return createSessionForApp(app, { closeSidebar, principal });
 }
 
-function createNewAppShortcut({ closeSidebar = true } = {}) {
-  return focusNewAppComposer({ closeSidebar });
+function createSortSessionListShortcut() {
+  return organizeSessionListWithAgent({ closeSidebar: false });
 }
 
 menuBtn.addEventListener("click", openSidebar);
@@ -32,9 +32,9 @@ sidebarOverlay.addEventListener("click", (e) => {
   if (e.target === sidebarOverlay && !isDesktop) closeSidebarFn();
 });
 
-// ---- New Session ----
-newAppBtn.addEventListener("click", () => {
-  createNewAppShortcut();
+// ---- Session list actions ----
+sortSessionListBtn.addEventListener("click", () => {
+  void createSortSessionListShortcut();
 });
 
 newSessionBtn.addEventListener("click", () => {

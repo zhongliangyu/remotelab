@@ -187,6 +187,13 @@
     return getSessionLatestChangeTime(session);
   }
 
+  function normalizeSessionSidebarOrder(value) {
+    const parsed = typeof value === "number"
+      ? value
+      : Number.parseInt(String(value || "").trim(), 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+  }
+
   function cloneBoardColumn(column) {
     return { ...(column || defaultBoardColumn) };
   }
@@ -400,6 +407,12 @@
   }
 
   function compareSessionListSessions(a, b) {
+    const sidebarOrderA = normalizeSessionSidebarOrder(a?.sidebarOrder);
+    const sidebarOrderB = normalizeSessionSidebarOrder(b?.sidebarOrder);
+    if (sidebarOrderA && sidebarOrderB && sidebarOrderA !== sidebarOrderB) {
+      return sidebarOrderA - sidebarOrderB;
+    }
+
     const attentionBandDiff = getSessionAttentionBand(a) - getSessionAttentionBand(b);
     if (attentionBandDiff) return attentionBandDiff;
 

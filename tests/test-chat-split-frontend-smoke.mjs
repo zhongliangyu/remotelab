@@ -342,7 +342,7 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 
 assert.equal(typeof context.readNavigationStateFromLocation, 'function');
 assert.equal(typeof context.createNewSessionShortcut, 'function');
-assert.equal(typeof context.createNewAppShortcut, 'function');
+assert.equal(typeof context.createSortSessionListShortcut, 'function');
 assert.equal(typeof context.switchTab, 'function');
 
 console.log('test-chat-split-frontend-smoke: ok');

@@ -206,6 +206,14 @@ assert.ok(
 
 assert.ok(
   model.compareSessionListSessions(
+    makeSession({ sidebarOrder: 1, updatedAt: '2026-03-14T12:00:00.000Z' }),
+    makeSession({ sidebarOrder: 3, updatedAt: '2026-03-14T13:00:00.000Z' }),
+  ) < 0,
+  'lower explicit sidebar order should sort sessions first when both sessions are organized',
+);
+
+assert.ok(
+  model.compareSessionListSessions(
     makeSession({
       workflowState: 'done',
       lastEventAt: '2026-03-14T13:00:00.000Z',

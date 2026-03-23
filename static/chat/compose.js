@@ -615,7 +615,7 @@ function switchTab(tab, { syncState = true, expandBoard = false } = {}) {
   document.body.classList.toggle("board-tab-active", showingBoard);
   syncBoardSidebarExpansion({ expandBoard: showingBoard && expandBoard });
   sessionListFooter.classList.toggle("hidden", activeTab === "settings");
-  newAppBtn.classList.toggle("hidden", activeTab === "settings");
+  sortSessionListBtn.classList.toggle("hidden", activeTab === "settings");
   newSessionBtn.classList.toggle("hidden", activeTab === "settings");
   if (activeTab === "settings" && !visitorMode && typeof fetchAppsList === "function") {
     void fetchAppsList().catch((error) => {

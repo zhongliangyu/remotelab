@@ -24,6 +24,13 @@ function normalizeStoredTimestamp(value) {
   return Number.isFinite(time) ? new Date(time).toISOString() : '';
 }
 
+function normalizeStoredSidebarOrder(value) {
+  const parsed = typeof value === 'number'
+    ? value
+    : parseInt(String(value || '').trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function normalizeStoredSessionMeta(meta) {
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
     return { meta: null, changed: true };
@@ -74,6 +81,19 @@ function normalizeStoredSessionMeta(meta) {
       }
     } else {
       delete normalized.lastReviewedAt;
+      changed = true;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, 'sidebarOrder')) {
+    const nextSidebarOrder = normalizeStoredSidebarOrder(normalized.sidebarOrder);
+    if (nextSidebarOrder) {
+      if (normalized.sidebarOrder !== nextSidebarOrder) {
+        normalized.sidebarOrder = nextSidebarOrder;
+        changed = true;
+      }
+    } else {
+      delete normalized.sidebarOrder;
       changed = true;
     }
   }
