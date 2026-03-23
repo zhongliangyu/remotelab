@@ -94,10 +94,10 @@ function buildSessionListOrganizerSessionMetadata(session) {
     id: session?.id || "",
     title: clipSessionListOrganizerText(getSessionDisplayName(session), 160),
     brief: clipSessionListOrganizerText(brief, 280),
-    currentGroup: typeof session?.group === "string" && session.group.trim()
+    existingGroup: typeof session?.group === "string" && session.group.trim()
       ? clipSessionListOrganizerText(session.group, 80)
       : null,
-    currentSidebarOrder: Number.isInteger(session?.sidebarOrder) && session.sidebarOrder > 0
+    existingSidebarOrder: Number.isInteger(session?.sidebarOrder) && session.sidebarOrder > 0
       ? session.sidebarOrder
       : null,
     pinned: session?.pinned === true,

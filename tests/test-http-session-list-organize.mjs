@@ -73,8 +73,20 @@ function buildFakeCodexScript() {
     '  void (async () => {',
     '    try {',
     '      if (organizerMatch) {',
+    '        if (!prompt.includes("Only writable API fields for this task are `group` and `sidebarOrder`.")) {',
+    '          throw new Error("organizer prompt missing writable field guidance");',
+    '        }',
+    '        if (!prompt.includes("Never send read-only snapshot keys such as `title`, `brief`, `existingGroup`, `existingSidebarOrder`, `currentGroup`, or `currentSidebarOrder` in PATCH bodies.")) {',
+    '          throw new Error("organizer prompt missing read-only field guidance");',
+    '        }',
+    '        if (!prompt.includes("Snapshot fields like `title`, `brief`, `existingGroup`, and `existingSidebarOrder` are read-only context.")) {',
+    '          throw new Error("organizer task missing snapshot field guidance");',
+    '        }',
     '        const payload = JSON.parse(organizerMatch[1]);',
     '        const sessions = Array.isArray(payload.sessions) ? payload.sessions.slice() : [];',
+    '        if (sessions.some((session) => Object.prototype.hasOwnProperty.call(session, "currentGroup") || Object.prototype.hasOwnProperty.call(session, "currentSidebarOrder"))) {',
+    '          throw new Error("organizer payload should use existing* snapshot fields");',
+    '        }',
     '        const projectRoot = process.env.REMOTELAB_PROJECT_ROOT || process.cwd();',
     '        const baseUrl = process.env.REMOTELAB_CHAT_BASE_URL || `http://127.0.0.1:${process.env.CHAT_PORT || "7690"}`;',
     '        const cliPath = `${projectRoot}/cli.js`;',
@@ -240,6 +252,30 @@ try {
   const completedRun = await waitForRunCompletion(port, organize.json.run.id);
   assert.equal(completedRun?.state, 'completed', 'organizer run should complete successfully');
 
+  const organizerManifest = JSON.parse(
+    readFileSync(join(home, '.config', 'remotelab', 'chat-runs', organize.json.run.id, 'manifest.json'), 'utf8'),
+  );
+  assert.match(
+    organizerManifest.prompt,
+    /Only writable API fields for this task are `group` and `sidebarOrder`\./,
+    'organizer prompt should spell out the writable session fields',
+  );
+  assert.match(
+    organizerManifest.prompt,
+    /"existingGroup": ""/,
+    'organizer task payload should expose existingGroup as read-only snapshot context',
+  );
+  assert.match(
+    organizerManifest.prompt,
+    /"existingSidebarOrder": null/,
+    'organizer task payload should expose existingSidebarOrder as read-only snapshot context',
+  );
+  assert.doesNotMatch(
+    organizerManifest.prompt,
+    /"currentGroup"|"currentSidebarOrder"/,
+    'organizer task payload should not use the older current* field names',
+  );
+
   const listed = await request(port, 'GET', '/api/sessions');
   assert.equal(listed.status, 200, 'session list should remain available after organizing');
   assert.equal((listed.json.sessions || []).length, 2, 'hidden organizer session should not appear in the normal list');
@@ -254,6 +290,11 @@ try {
   const storedMeta = JSON.parse(readFileSync(join(configDir, 'chat-sessions.json'), 'utf8'));
   const hiddenOrganizer = storedMeta.find((entry) => entry && entry.internalRole === 'session_list_organizer');
   assert.ok(hiddenOrganizer, 'organizer trigger should create a hidden internal session');
+  assert.match(
+    hiddenOrganizer.systemPrompt || '',
+    /Only writable API fields for this task are `group` and `sidebarOrder`\./,
+    'hidden organizer session should persist the writable field guardrail',
+  );
 
   console.log('test-http-session-list-organize: ok');
 } finally {

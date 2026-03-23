@@ -257,7 +257,7 @@ async function runSessionLabelSuggestion(sessionMeta, onRename, options = {}) {
     promptContext.contextSummary ? `Earlier session context:\n${promptContext.contextSummary}` : '',
     promptContext.scopeRouter ? `Known scope router entries:\n${promptContext.scopeRouter}` : '',
     promptContext.existingSessions ? `Current non-archived sessions:\n${promptContext.existingSessions}` : '',
-    shouldGenerateTitle ? 'The current name is only a temporary draft. Generate a better final title based mainly on the latest user request.' : '',
+    shouldGenerateTitle ? 'The current name is only a temporary draft. Generate a better final title based on the latest full turn, using the user request as the main signal and the assistant reply to sharpen the task wording.' : '',
     shouldGenerateGrouping ? 'Also generate a stable one-level display group for session-list organization. This is not a filesystem path.' : '',
     shouldGenerateTitle ? 'The display group is shown separately in the UI. The title must focus on the specific task inside that group and should not repeat the group/domain words unless disambiguation truly requires it.' : '',
     shouldGenerateTitle ? 'Likewise, avoid repeating connector, provider, source, or app labels that are already captured elsewhere in session metadata unless they add real disambiguating context.' : '',

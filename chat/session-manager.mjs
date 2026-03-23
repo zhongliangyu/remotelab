@@ -165,6 +165,9 @@ const SESSION_LIST_ORGANIZER_SYSTEM_PROMPT = [
   'Only update existing sessions by calling the owner-authenticated RemoteLab API from this machine.',
   'Use `remotelab api GET /api/sessions` if you need to double-check current state.',
   'Use `remotelab api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.',
+  'Only writable API fields for this task are `group` and `sidebarOrder`.',
+  'Never send read-only snapshot keys such as `title`, `brief`, `existingGroup`, `existingSidebarOrder`, `currentGroup`, or `currentSidebarOrder` in PATCH bodies.',
+  'Example PATCH body: {"group":"RemoteLab","sidebarOrder":3}',
   'If `remotelab` is unavailable in PATH, use `node "$REMOTELAB_PROJECT_ROOT/cli.js" api ...` instead.',
   '`sidebarOrder` must be a positive integer; smaller numbers sort first.',
   'Assign unique contiguous `sidebarOrder` values across the current non-archived sessions you organize.',
@@ -212,7 +215,11 @@ function normalizeSessionListOrganizerEntry(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
   const id = typeof entry.id === 'string' ? entry.id.trim() : '';
   if (!id) return null;
-  const sidebarOrder = normalizeSessionSidebarOrder(entry.currentSidebarOrder ?? entry.sidebarOrder);
+  const sidebarOrder = normalizeSessionSidebarOrder(
+    entry.existingSidebarOrder
+    ?? entry.currentSidebarOrder
+    ?? entry.sidebarOrder,
+  );
   const messageCount = Number.isInteger(entry.messageCount) && entry.messageCount >= 0
     ? entry.messageCount
     : 0;
@@ -220,8 +227,14 @@ function normalizeSessionListOrganizerEntry(entry) {
     id,
     title: clipSessionListOrganizerText(entry.title || entry.name || '', 160),
     brief: clipSessionListOrganizerText(entry.brief || entry.description || '', 280),
-    currentGroup: clipSessionListOrganizerText(entry.currentGroup || entry.group || '', 80),
-    currentSidebarOrder: sidebarOrder || null,
+    existingGroup: clipSessionListOrganizerText(
+      entry.existingGroup
+      || entry.currentGroup
+      || entry.group
+      || '',
+      80,
+    ),
+    existingSidebarOrder: sidebarOrder || null,
     pinned: entry.pinned === true,
     tool: clipSessionListOrganizerText(entry.tool || '', 40),
     appName: clipSessionListOrganizerText(entry.appName || '', 80),
@@ -247,6 +260,8 @@ function buildSessionListOrganizerTask(entries = []) {
     'Organize the current non-archived RemoteLab session list using the provided metadata snapshot.',
     'Choose clearer groups and a better sidebar ordering based on the current session density.',
     'Apply changes by calling the RemoteLab API from this machine; do not merely suggest them.',
+    'Snapshot fields like `title`, `brief`, `existingGroup`, and `existingSidebarOrder` are read-only context.',
+    'When patching a session, send only `group` and `sidebarOrder` in the API body.',
     '',
     '<session_list_organizer_input>',
     JSON.stringify(payload, null, 2),
@@ -4061,7 +4076,7 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
       description: session.description || '',
       appName: session.appName || '',
       sourceName: session.sourceName || '',
-      autoRenamePending: session.autoRenamePending,
+      autoRenamePending: false,
       tool: effectiveTool,
       model: options.model || undefined,
       effort: options.effort || undefined,
