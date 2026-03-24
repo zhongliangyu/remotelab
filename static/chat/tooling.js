@@ -222,6 +222,11 @@ function updateCopyButtonLabel(button, label) {
   }, 1400);
 }
 
+function getToolingLabel(key, vars) {
+  if (typeof t === "function") return t(key, vars);
+  return window.remotelabT ? window.remotelabT(key, vars) : key;
+}
+
 function resetHeaderActionButton(button) {
   if (!button) return;
   button.disabled = false;
@@ -258,7 +263,7 @@ function getShareSnapshotTitle(session) {
   if (name) return name;
   const tool = typeof session?.tool === "string" ? session.tool.trim() : "";
   if (tool) return tool;
-  return `RemoteLab ${t("status.readOnlySnapshot")}`;
+  return `RemoteLab ${getToolingLabel("status.readOnlySnapshot")}`;
 }
 
 function buildShareSnapshotShareText(session, shareUrl) {
@@ -295,7 +300,7 @@ async function shareCurrentSessionSnapshot() {
     if (navigator.share) {
       try {
         await navigator.share({ text: shareText });
-        updateCopyButtonLabel(shareSnapshotBtn, t("action.share"));
+        updateCopyButtonLabel(shareSnapshotBtn, getToolingLabel("action.share"));
         return;
       } catch (err) {
         if (err?.name === "AbortError") return;
@@ -304,14 +309,14 @@ async function shareCurrentSessionSnapshot() {
 
     try {
       await copyText(shareText);
-      updateCopyButtonLabel(shareSnapshotBtn, t("action.copied"));
+      updateCopyButtonLabel(shareSnapshotBtn, getToolingLabel("action.copied"));
     } catch {
       window.prompt("Copy share text", shareText);
-      updateCopyButtonLabel(shareSnapshotBtn, t("action.copy"));
+      updateCopyButtonLabel(shareSnapshotBtn, getToolingLabel("action.copy"));
     }
   } catch (err) {
     console.warn("[share] Failed to create snapshot:", err.message);
-    updateCopyButtonLabel(shareSnapshotBtn, t("action.copyFailed"));
+    updateCopyButtonLabel(shareSnapshotBtn, getToolingLabel("action.copyFailed"));
   } finally {
     shareSnapshotBtn.disabled = false;
     syncShareButton();
@@ -324,7 +329,7 @@ async function forkCurrentSession() {
   const original = forkSessionBtn.dataset.originalLabel || forkSessionBtn.textContent;
   forkSessionBtn.dataset.originalLabel = original;
   forkSessionBtn.disabled = true;
-  forkSessionBtn.textContent = `${t("action.fork")}…`;
+  forkSessionBtn.textContent = `${getToolingLabel("action.fork")}…`;
 
   try {
     const data = await fetchJsonOrRedirect(`/api/sessions/${encodeURIComponent(currentSessionId)}/fork`, {
@@ -333,13 +338,13 @@ async function forkCurrentSession() {
     if (data.session) {
       upsertSession(data.session);
       renderSessionList();
-      updateCopyButtonLabel(forkSessionBtn, t("action.fork"));
+      updateCopyButtonLabel(forkSessionBtn, getToolingLabel("action.fork"));
     } else {
-      updateCopyButtonLabel(forkSessionBtn, t("action.copyFailed"));
+      updateCopyButtonLabel(forkSessionBtn, getToolingLabel("action.copyFailed"));
     }
   } catch (err) {
     console.warn("[fork] Failed to fork session:", err.message);
-    updateCopyButtonLabel(forkSessionBtn, t("action.copyFailed"));
+    updateCopyButtonLabel(forkSessionBtn, getToolingLabel("action.copyFailed"));
   } finally {
     syncForkButton();
   }
