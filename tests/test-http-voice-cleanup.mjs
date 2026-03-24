@@ -232,6 +232,22 @@ try {
   assert.equal(contextRewriteRes.json.rawTranscript, '请先把轻云版那个通道再发一次');
   assert.equal(contextRewriteRes.json.rewriteApplied, true, 'session-context transcript cleanup should use recent discussion when stable memory is not enough');
 
+  const rewrittenSendRes = await request(chatPort, 'POST', `/api/sessions/${contextualSession.id}/messages`, {
+    requestId: 'req-context-rewrite',
+    text: '请先把轻云版那个通道再发一次',
+    rewriteWithContext: true,
+  });
+  assert.ok(rewrittenSendRes.status === 202 || rewrittenSendRes.status === 200, 'message submission with rewrite should be accepted');
+  assert.ok(rewrittenSendRes.json?.run?.id, 'message submission with rewrite should create a run');
+  await waitForRunTerminal(chatPort, rewrittenSendRes.json.run.id);
+
+  const eventsRes = await request(chatPort, 'GET', `/api/sessions/${contextualSession.id}/events?filter=all`);
+  assert.equal(eventsRes.status, 200, 'event history should load after the rewritten message is accepted');
+  const rewrittenUserEvent = Array.isArray(eventsRes.json?.events)
+    ? [...eventsRes.json.events].reverse().find((event) => event?.type === 'message' && event.role === 'user' && event.requestId === 'req-context-rewrite')
+    : null;
+  assert.equal(rewrittenUserEvent?.content, '请先把青云版那个通道再发一次', 'message submission should persist the cleaned transcript into canonical session history');
+
   console.log('test-http-voice-cleanup: ok');
 } catch (error) {
   console.error(error);

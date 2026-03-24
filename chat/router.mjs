@@ -288,6 +288,7 @@ async function readSessionMessagePayload(req, pathname) {
     model: parseFormString(formData.get('model')),
     effort: parseFormString(formData.get('effort')),
     thinking: parseFormString(formData.get('thinking')) === 'true',
+    rewriteWithContext: parseFormString(formData.get('rewriteWithContext')) === 'true',
     sourceContext: parseFormJson(parseFormString(formData.get('sourceContext')), null),
     images,
   };
@@ -1725,6 +1726,7 @@ export async function handleRequest(req, res) {
           thinking: authSession?.role === 'visitor' ? false : !!payload.thinking,
           model: authSession?.role === 'visitor' ? undefined : payload.model || undefined,
           effort: authSession?.role === 'visitor' ? undefined : payload.effort || undefined,
+          rewriteWithContext: payload.rewriteWithContext === true,
           sourceContext: authSession?.role === 'visitor' ? undefined : payload.sourceContext,
           ...(preSavedAttachments.length > 0 ? { preSavedAttachments } : {}),
         };

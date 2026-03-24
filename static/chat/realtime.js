@@ -198,10 +198,12 @@ async function dispatchAction(msg) {
         return true;
       }
       case "send": {
+        const targetSessionId = msg.sessionId || currentSessionId;
+        if (!targetSessionId) return false;
         const requestId = msg.requestId || createRequestId();
         const canUseMultipart = Array.isArray(msg.images)
           && msg.images.some((image) => image?.file && typeof image.file.arrayBuffer === "function");
-        const requestUrl = `/api/sessions/${encodeURIComponent(currentSessionId)}/messages`;
+        const requestUrl = `/api/sessions/${encodeURIComponent(targetSessionId)}/messages`;
         const data = canUseMultipart
           ? await (async () => {
               const formData = new FormData();
@@ -213,6 +215,7 @@ async function dispatchAction(msg) {
               if (msg.model) formData.set("model", msg.model);
               if (msg.effort) formData.set("effort", msg.effort);
               if (msg.thinking) formData.set("thinking", "true");
+              if (msg.rewriteWithContext) formData.set("rewriteWithContext", "true");
               for (const image of msg.images || []) {
                 if (image?.file) {
                   formData.append("images", image.file, image.originalName || image.file.name || "attachment");
@@ -250,6 +253,7 @@ async function dispatchAction(msg) {
               body: JSON.stringify({
                 requestId,
                 text: msg.text,
+                ...(msg.rewriteWithContext ? { rewriteWithContext: true } : {}),
                 ...(msg.images ? { images: msg.images } : {}),
                 ...(msg.tool ? { tool: msg.tool } : {}),
                 ...(msg.model ? { model: msg.model } : {}),
@@ -268,10 +272,18 @@ async function dispatchAction(msg) {
           }
         }
         try {
-          await refreshCurrentSession();
+          if (currentSessionId === targetSessionId) {
+            await refreshCurrentSession();
+          } else {
+            await refreshSidebarSession(targetSessionId);
+          }
         } catch {
           setTimeout(() => {
-            refreshCurrentSession().catch(() => {});
+            if (currentSessionId === targetSessionId) {
+              refreshCurrentSession().catch(() => {});
+            } else {
+              refreshSidebarSession(targetSessionId).catch(() => {});
+            }
           }, 0);
         }
         return true;

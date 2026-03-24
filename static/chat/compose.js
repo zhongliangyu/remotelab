@@ -345,6 +345,11 @@ function sendMessage(existingRequestId) {
   const sessionId = currentSessionId;
   const queuedImages = pendingImages.slice();
   const shouldCleanTranscript = shouldRunComposerVoiceCleanup(sessionId, text);
+  const sendTool = selectedTool;
+  const sendModel = selectedModel;
+  const sendReasoningKind = currentToolReasoningKind;
+  const sendEffort = selectedEffort;
+  const sendThinking = thinkingEnabled === true;
 
   pendingComposerSend = {
     sessionId,
@@ -362,36 +367,30 @@ function sendMessage(existingRequestId) {
     let outboundText = text;
     let outboundImages = queuedImages;
     try {
-      if (shouldCleanTranscript) {
-        const cleanupResult = await maybeRewriteComposerTextBeforeSend(sessionId, text);
-        if (!(pendingComposerSend && pendingComposerSend.requestId === requestId)) return;
-        outboundText = cleanupResult.text || text;
-        pendingComposerSend.text = outboundText;
-        pendingComposerSend.stage = "sending";
-        pendingComposerSend.cleanupApplied = cleanupResult.rewriteApplied === true;
-        pendingComposerSend.cleanupFallback = cleanupResult.fallback === true;
-        syncComposerPendingUi();
-      }
-
       if (queuedImages.length > 0) {
         pendingComposerSend.stage = "uploading";
         syncComposerPendingUi();
         outboundImages = await prepareComposerAttachmentsForSend(sessionId, queuedImages);
         if (!(pendingComposerSend && pendingComposerSend.requestId === requestId)) return;
         pendingComposerSend.images = outboundImages.slice();
-        pendingComposerSend.stage = "sending";
+        pendingComposerSend.stage = shouldCleanTranscript ? "cleaning" : "sending";
         syncComposerPendingUi();
       }
 
-      const msg = { action: "send", text: outboundText || "(attachment)" };
+      const msg = {
+        action: "send",
+        sessionId,
+        text: outboundText || "(attachment)",
+        rewriteWithContext: shouldCleanTranscript,
+      };
       msg.requestId = requestId;
       if (!visitorMode) {
-        if (selectedTool) msg.tool = selectedTool;
-        if (selectedModel) msg.model = selectedModel;
-        if (currentToolReasoningKind === "enum") {
-          if (selectedEffort) msg.effort = selectedEffort;
-        } else if (currentToolReasoningKind === "toggle") {
-          msg.thinking = thinkingEnabled;
+        if (sendTool) msg.tool = sendTool;
+        if (sendModel) msg.model = sendModel;
+        if (sendReasoningKind === "enum") {
+          if (sendEffort) msg.effort = sendEffort;
+        } else if (sendReasoningKind === "toggle") {
+          msg.thinking = sendThinking;
         }
       }
       if (outboundImages.length > 0) {

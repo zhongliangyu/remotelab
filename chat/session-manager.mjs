@@ -4103,6 +4103,19 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
     };
   }
 
+  let normalizedText = text.trim();
+  if (options.rewriteWithContext === true && normalizedText) {
+    try {
+      const rewritten = await rewriteVoiceTranscriptForSession(sessionId, normalizedText);
+      const rewrittenText = typeof rewritten?.transcript === 'string' ? rewritten.transcript.trim() : '';
+      if (rewrittenText) {
+        normalizedText = rewrittenText;
+      }
+    } catch (error) {
+      console.warn(`[voice-cleanup] message rewrite failed for ${sessionId.slice(0, 8)}: ${error?.message || error}`);
+    }
+  }
+
   let activeRun = null;
   let hasActiveRun = false;
   const hasPendingCompact = liveSessions.get(sessionId)?.pendingCompact === true;
@@ -4121,7 +4134,6 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
   }
 
   if ((hasActiveRun || hasPendingCompact || getFollowUpQueueCount(sessionMeta) > 0) && options.queueIfBusy !== false) {
-    const normalizedText = text.trim();
     const queuedImages = options.preSavedAttachments?.length > 0
       ? sanitizeQueuedFollowUpAttachments(options.preSavedAttachments)
       : sanitizeQueuedFollowUpAttachments(await saveAttachments(images));
@@ -4162,7 +4174,6 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
   const snapshot = await getHistorySnapshot(sessionId);
   const previousTool = session.tool;
   const effectiveTool = options.tool || session.tool;
-  const normalizedText = text.trim();
   const recordedUserText = typeof options.recordedUserText === 'string' && options.recordedUserText.trim()
     ? options.recordedUserText.trim()
     : normalizedText;

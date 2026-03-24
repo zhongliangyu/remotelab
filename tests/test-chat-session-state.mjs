@@ -256,6 +256,59 @@ assert.equal(savedPendingCalls, 0, 'frontend should not persist pending-send sta
 assert.equal(clearedPendingCalls, 0, 'frontend should not clear any pending-send cache because none exists');
 assert.equal(attentionRefreshes, 0, 'frontend should not synthesize unread or send-failure attention state');
 
+const detachedSendContext = createBaseContext();
+let detachedCurrentRefreshes = 0;
+let detachedSidebarRefreshes = 0;
+let detachedRequestPayload = null;
+
+detachedSendContext.currentSessionId = 'session-viewing';
+detachedSendContext.createRequestId = () => 'req-detached';
+detachedSendContext.fetchSessionsList = async () => [];
+detachedSendContext.refreshCurrentSession = async () => {
+  detachedCurrentRefreshes += 1;
+  return { ok: true };
+};
+detachedSendContext.refreshSidebarSession = async (sessionId) => {
+  detachedSidebarRefreshes += 1;
+  return { id: sessionId };
+};
+detachedSendContext.fetchJsonOrRedirect = async (url, options = {}) => {
+  detachedRequestPayload = { url, options };
+  return {
+    queued: true,
+    session: {
+      id: 'session-origin',
+      activity: createSessionActivity({ runState: 'running', queueState: 'queued', queueCount: 1 }),
+    },
+  };
+};
+detachedSendContext.upsertSession = (value) => value;
+detachedSendContext.renderSessionList = () => {};
+detachedSendContext.applyAttachedSessionState = () => {
+  throw new Error('send should not reattach a different session while the user is viewing another one');
+};
+detachedSendContext.finalizeComposerPendingSend = () => true;
+detachedSendContext.savePendingMessage = () => {};
+detachedSendContext.clearPendingMessage = () => {};
+detachedSendContext.refreshSessionAttentionUi = () => {};
+detachedSendContext.setTimeout = () => 1;
+
+vm.runInNewContext(dispatchActionSnippet, detachedSendContext, {
+  filename: 'chat-dispatch-action-runtime-detached.js',
+});
+
+const detachedSendAccepted = await detachedSendContext.dispatchAction({
+  action: 'send',
+  sessionId: 'session-origin',
+  text: 'send this from the original session',
+  rewriteWithContext: true,
+});
+assert.equal(detachedSendAccepted, true, 'session-bound sends should still succeed when the UI is attached elsewhere');
+assert.equal(detachedRequestPayload?.url, '/api/sessions/session-origin/messages', 'send should target the explicit origin session instead of the currently attached one');
+assert.match(String(detachedRequestPayload?.options?.body || ''), /"rewriteWithContext":true/, 'send should forward the rewrite flag through the HTTP payload');
+assert.equal(detachedCurrentRefreshes, 0, 'detached sends should not refresh the unrelated currently attached session');
+assert.equal(detachedSidebarRefreshes, 1, 'detached sends should refresh the origin session in the sidebar instead');
+
 const attachReuseContext = createBaseContext();
 let attachRefreshCalls = 0;
 let attachStateCalls = 0;
