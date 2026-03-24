@@ -263,7 +263,7 @@ remotelab set-password         Set username & password login
 remotelab --help               Show help
 ```
 
-For quick shareable sandboxes on the same machine, use `remotelab guest-instance create <name>`. It provisions a separate `REMOTELAB_INSTANCE_ROOT`, a dedicated launchd service, and an optional Cloudflare hostname without mixing chat history or memory into the owner's main instance.
+For quick shareable sandboxes on the same machine, use `remotelab guest-instance create <name>`. It provisions a separate `REMOTELAB_INSTANCE_ROOT`, a dedicated launchd service, and an optional Cloudflare hostname without mixing chat history or memory into the owner's main instance. If the agent mailbox is initialized, `create` and `show` also print the default inbound alias for that instance, such as `rowan+trial4@example.com`.
 
 Production updates should go through `remotelab release` rather than live-editing the running `7690` surface. The release command snapshots the shipped runtime, restarts only after the test gate passes, and automatically restores the previous active release if the health check fails.
 
