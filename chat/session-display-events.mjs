@@ -1,3 +1,5 @@
+import { stripEventAttachmentSavedPaths } from './attachment-utils.mjs';
+
 const HIDDEN_EVENT_TYPES = new Set(['reasoning', 'manager_context', 'tool_use', 'tool_result', 'file_change']);
 
 function cloneJson(value) {
@@ -24,7 +26,7 @@ function isVisibleEvent(event) {
 }
 
 function stripDeferredBodyFields(event) {
-  const next = cloneJson(event);
+  const next = stripEventAttachmentSavedPaths(cloneJson(event));
   if (!next || typeof next !== 'object') return next;
   delete next.bodyRef;
   delete next.bodyField;

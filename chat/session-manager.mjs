@@ -54,6 +54,10 @@ import {
   normalizeSessionWorkflowState,
 } from './session-workflow-state.mjs';
 import {
+  formatAttachmentContextLine,
+  stripEventAttachmentSavedPaths,
+} from './attachment-utils.mjs';
+import {
   createRun,
   findRunByRequest,
   getRun,
@@ -505,12 +509,6 @@ function resolveAttachmentExtension(mimeType, originalName = '') {
   return '.bin';
 }
 
-function getAttachmentDisplayName(attachment) {
-  const originalName = sanitizeOriginalAttachmentName(attachment?.originalName || '');
-  if (originalName) return originalName;
-  return typeof attachment?.filename === 'string' ? attachment.filename : '';
-}
-
 function sanitizeQueuedFollowUpAttachments(images) {
   return (images || [])
     .map((image) => {
@@ -610,10 +608,8 @@ function formatQueuedFollowUpTextEntry(entry, index) {
       lines.push(text);
     }
   }
-  const attachmentNames = (entry?.images || []).map((image) => getAttachmentDisplayName(image)).filter(Boolean);
-  if (attachmentNames.length > 0) {
-    lines.push(`[Attached files: ${attachmentNames.join(', ')}]`);
-  }
+  const attachmentLine = formatAttachmentContextLine(entry?.images);
+  if (attachmentLine) lines.push(attachmentLine);
   return lines.join('\n');
 }
 
@@ -1771,18 +1767,7 @@ function clipVoiceTranscriptRewriteText(value, maxChars = 1200) {
 }
 
 function formatVoiceTranscriptRewriteImages(images = []) {
-  const refs = images
-    .map((image) => {
-      if (typeof image?.originalName === 'string' && image.originalName.trim()) {
-        return image.originalName.trim();
-      }
-      return typeof image?.filename === 'string' && image.filename.trim()
-        ? image.filename.trim()
-        : '';
-    })
-    .filter(Boolean);
-  if (refs.length === 0) return '';
-  return `[Attached files: ${refs.join(', ')}]`;
+  return formatAttachmentContextLine(images);
 }
 
 function formatVoiceTranscriptRewriteDiscussionEvent(event) {
@@ -2180,11 +2165,7 @@ function clipCompactionEventText(value, maxChars = 4000) {
 }
 
 function formatCompactionAttachments(images) {
-  const refs = (images || [])
-    .map((img) => getAttachmentDisplayName(img))
-    .filter(Boolean);
-  if (refs.length === 0) return '';
-  return `[Attached files: ${refs.join(', ')}]`;
+  return formatAttachmentContextLine(images);
 }
 
 function formatCompactionMessage(evt) {
@@ -2997,7 +2978,9 @@ export async function getSessionEventsAfter(sessionId, afterSeq = 0, options = {
   const events = await buildSessionTimelineEvents(sessionId, {
     includeBodies: options?.includeBodies !== false,
   });
-  return (Array.isArray(events) ? events : []).filter((event) => Number.isInteger(event?.seq) && event.seq > afterSeq);
+  const filtered = (Array.isArray(events) ? events : []).filter((event) => Number.isInteger(event?.seq) && event.seq > afterSeq);
+  if (options?.includeAttachmentPaths === true) return filtered;
+  return filtered.map((event) => stripEventAttachmentSavedPaths(event));
 }
 
 export async function getSessionTimelineEvents(sessionId, options = {}) {
@@ -3865,6 +3848,7 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
   const sourceContext = normalizeSourceContext(options.sourceContext);
   const imageRefs = savedImages.map((img) => ({
     filename: img.filename,
+    savedPath: img.savedPath,
     ...(img.originalName ? { originalName: img.originalName } : {}),
     mimeType: img.mimeType,
   }));
