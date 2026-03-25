@@ -10,6 +10,10 @@ import { spawn } from 'child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 const cookie = 'session_token=test-session';
+const expectedOutputs = Array.from({ length: 5 }, (_, index) => ({
+  name: `rough cut ${index + 1}.mp4`,
+  content: `rendered-video-asset-${index + 1}`,
+}));
 
 function randomPort() {
   return 38000 + Math.floor(Math.random() * 2000);
@@ -101,21 +105,26 @@ function setupTempHome() {
     `#!/usr/bin/env node
 const { mkdirSync, writeFileSync } = require('fs');
 const { join } = require('path');
+const outputs = ${JSON.stringify(expectedOutputs)};
 const outputDir = join(process.env.HOME, 'code', 'video-cut');
 mkdirSync(outputDir, { recursive: true });
-writeFileSync(join(outputDir, 'rough cut.mp4'), 'rendered-video-asset', 'utf8');
+for (const output of outputs) {
+  writeFileSync(join(outputDir, output.name), output.content, 'utf8');
+}
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-result-file-assets' }));
 console.log(JSON.stringify({ type: 'turn.started' }));
-console.log(JSON.stringify({
-  type: 'item.completed',
-  item: {
-    type: 'command_execution',
-    command: 'python cut.py raw.MOV --remove cuts.json -o "rough cut.mp4"',
-    aggregated_output: 'Removed 3 segment(s) (12.40s) → rough cut.mp4',
-    exit_code: 0,
-    status: 'completed'
-  }
-}));
+outputs.forEach((output, index) => {
+  console.log(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      type: 'command_execution',
+      command: 'python cut.py raw-' + (index + 1) + '.MOV --remove cuts-' + (index + 1) + '.json -o "' + output.name + '"',
+      aggregated_output: 'Removed 3 segment(s) (12.40s) → ' + output.name,
+      exit_code: 0,
+      status: 'completed'
+    }
+  }));
+});
 console.log(JSON.stringify({
   type: 'item.completed',
   item: { type: 'agent_message', text: 'render complete' }
@@ -261,12 +270,12 @@ try {
     }, 'generated result-file message');
 
     const generated = resultMessage.generated;
-    assert.equal(generated.content, 'Generated file ready to download.', 'generated result message should use the download-ready copy');
-    assert.equal(generated.images?.length, 1, 'generated result message should attach one published file');
-    assert.equal(generated.images[0].originalName, 'rough cut.mp4', 'generated result attachment should preserve the exported file name');
-    assert.equal(generated.images[0].mimeType, 'video/mp4', 'generated result attachment should preserve the video mime type');
-    assert.equal(generated.images[0].sizeBytes, Buffer.byteLength('rendered-video-asset', 'utf8'), 'generated result attachment should preserve the exported file size');
-    assert.equal(generated.images[0].renderAs, 'file', 'generated result attachment should render as a download row');
+    assert.equal(generated.content, 'Generated files ready to download.', 'generated result message should use the plural download-ready copy');
+    assert.equal(generated.images?.length, expectedOutputs.length, 'generated result message should attach every published file');
+    assert.deepEqual(generated.images.map((image) => image.originalName), expectedOutputs.map((output) => output.name), 'generated result attachments should preserve every exported file name');
+    assert.deepEqual(generated.images.map((image) => image.mimeType), expectedOutputs.map(() => 'video/mp4'), 'generated result attachments should preserve the video mime type');
+    assert.deepEqual(generated.images.map((image) => image.sizeBytes), expectedOutputs.map((output) => Buffer.byteLength(output.content, 'utf8')), 'generated result attachments should preserve every exported file size');
+    assert.ok(generated.images.every((image) => image.renderAs === 'file'), 'generated result attachments should render as download rows');
 
     const finalAssistant = resultMessage.events.find((event) => event.type === 'message' && event.role === 'assistant' && event.content === 'render complete');
     assert.ok(finalAssistant, 'original assistant completion message should still be present');
@@ -274,7 +283,7 @@ try {
     const assetId = generated.images[0].assetId;
     const assetRes = await request(port, 'GET', `/api/assets/${assetId}`);
     assert.equal(assetRes.status, 200, 'published result asset metadata should load');
-    assert.equal(assetRes.json.asset.originalName, 'rough cut.mp4', 'published asset should keep the export filename');
+    assert.equal(assetRes.json.asset.originalName, expectedOutputs[0].name, 'published asset should keep the export filename');
 
     const downloadRes = await fetch(`http://127.0.0.1:${port}/api/assets/${assetId}/download`, {
       method: 'GET',
@@ -285,7 +294,7 @@ try {
 
     const redirected = await fetch(String(downloadRes.headers.get('location') || ''), { method: 'GET' });
     assert.equal(redirected.status, 200, 'redirected object-storage download should succeed');
-    assert.equal(await redirected.text(), 'rendered-video-asset', 'redirected object-storage download should return the exported file');
+    assert.equal(await redirected.text(), expectedOutputs[0].content, 'redirected object-storage download should return the exported file');
   } finally {
     await stopServer(chatServer);
     await new Promise((resolve) => storageServer.close(resolve));

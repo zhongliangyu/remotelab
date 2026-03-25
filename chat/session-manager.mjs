@@ -183,7 +183,6 @@ const DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_PERCENT = 100;
 const FOLLOW_UP_FLUSH_DELAY_MS = 1500;
 const MAX_RECENT_FOLLOW_UP_REQUEST_IDS = 100;
 const OBSERVED_RUN_POLL_INTERVAL_MS = 250;
-const RESULT_FILE_MAX_ATTACHMENTS = 4;
 const RESULT_FILE_COMMAND_OUTPUT_FLAGS = new Set(['-o', '--output', '--out', '--export']);
 
 function parsePositiveIntOrInfinity(value) {
@@ -734,9 +733,6 @@ async function collectGeneratedResultFilesFromRun(run, manifest, normalizedEvent
         originalName,
         mimeType: resolveAttachmentMimeType('', originalName || basename(localPath)),
       });
-      if (filesByPath.size >= RESULT_FILE_MAX_ATTACHMENTS) {
-        return [...filesByPath.values()];
-      }
     }
   }
 
