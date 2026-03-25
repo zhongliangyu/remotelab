@@ -298,8 +298,15 @@ function reconcilePendingMessageState(event) {
 const pendingSessionReviewSyncs = new Map();
 
 function normalizeSessionReviewStamp(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? new Date(value).toISOString() : "";
+  }
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed) return "";
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? new Date(numeric).toISOString() : "";
+  }
   const time = new Date(trimmed).getTime();
   return Number.isFinite(time) ? new Date(time).toISOString() : "";
 }
@@ -310,7 +317,10 @@ function getSessionReviewStampTime(value) {
 }
 
 function getSessionReviewStamp(session) {
-  return normalizeSessionReviewStamp(session?.lastEventAt || session?.updatedAt || session?.created || "");
+  return normalizeSessionReviewStamp(session?.lastEventAt)
+    || normalizeSessionReviewStamp(session?.updatedAt)
+    || normalizeSessionReviewStamp(session?.created)
+    || "";
 }
 
 function getEffectiveSessionReviewedAt(session) {

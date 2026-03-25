@@ -106,6 +106,12 @@ const applyAttachedSessionStateSnippet = sliceBetween(
   'async function fetchSessionState',
 );
 
+const sessionReviewSnippet = sliceBetween(
+  sessionHttpSource,
+  'const pendingSessionReviewSyncs = new Map();',
+  'function normalizeSessionRecord',
+);
+
 const dispatchActionSnippet = sliceBetween(
   realtimeSource,
   'async function dispatchAction',
@@ -387,6 +393,37 @@ assert.equal(attachQueued, true, 'attach should succeed for queued sessions');
 assert.equal(queuedAttachEventCalls, 1, 'attach should still fetch events for queued sessions');
 assert.equal(queuedAttachStateCalls, 1, 'attach should fetch detail only when queued follow-up bodies are actually needed');
 assert.equal(queuedAttachRefreshCalls, 0, 'queued attach should still avoid the older full refresh path');
+
+const reviewContext = createBaseContext();
+let reviewRenderCalls = 0;
+
+reviewContext.renderSessionList = () => {
+  reviewRenderCalls += 1;
+};
+reviewContext.setLocalSessionReviewedAt = (_sessionId, stamp) => stamp;
+
+vm.runInNewContext(sessionReviewSnippet, reviewContext, {
+  filename: 'chat-session-review-runtime.js',
+});
+
+const numericTimestamp = 1767225600000;
+const reviewSession = {
+  id: 'session-reviewed',
+  lastEventAt: numericTimestamp,
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
+const reviewedSession = await reviewContext.markSessionReviewed(reviewSession, { sync: false, render: true });
+assert.equal(
+  reviewSession.localReviewedAt,
+  new Date(numericTimestamp).toISOString(),
+  'marking a session reviewed should accept numeric event timestamps from the backend',
+);
+assert.equal(
+  reviewedSession.localReviewedAt,
+  new Date(numericTimestamp).toISOString(),
+  'markSessionReviewed should keep the normalized local review timestamp on the session record',
+);
+assert.equal(reviewRenderCalls, 1, 'markSessionReviewed should rerender the session list after storing a numeric review stamp');
 
 const archiveContext = createBaseContext();
 let archiveFilterRefreshes = 0;
