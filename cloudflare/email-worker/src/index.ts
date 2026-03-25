@@ -33,6 +33,39 @@ function firstNonEmpty(...values: unknown[]): string {
   return '';
 }
 
+function normalizeEmailAddress(value: unknown): string {
+  return trimString(value).toLowerCase();
+}
+
+function splitEmailAddressParts(value: unknown): { localPart: string; domain: string } {
+  const normalized = normalizeEmailAddress(value);
+  const atIndex = normalized.lastIndexOf('@');
+  if (atIndex === -1) {
+    return {
+      localPart: normalized,
+      domain: '',
+    };
+  }
+  return {
+    localPart: normalized.slice(0, atIndex),
+    domain: normalized.slice(atIndex + 1),
+  };
+}
+
+function senderAllowedForMailbox(sender: string, mailboxFrom: string): boolean {
+  const normalizedSender = normalizeEmailAddress(sender);
+  const normalizedMailboxFrom = normalizeEmailAddress(mailboxFrom);
+  if (!normalizedMailboxFrom) {
+    return !!normalizedSender;
+  }
+  if (normalizedSender === normalizedMailboxFrom) {
+    return true;
+  }
+  const senderParts = splitEmailAddressParts(normalizedSender);
+  const mailboxParts = splitEmailAddressParts(normalizedMailboxFrom);
+  return !!senderParts.localPart && !!senderParts.domain && senderParts.domain === mailboxParts.domain;
+}
+
 function normalizeRecipients(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) {
     return value.map((entry) => trimString(entry)).filter(Boolean);
@@ -176,8 +209,8 @@ async function handleOutboundSend(request: Request, env: Env): Promise<Response>
   if (!sender) {
     return jsonResponse({ error: 'A sender address is required' }, 400);
   }
-  if (mailboxFrom && sender.toLowerCase() !== mailboxFrom.toLowerCase()) {
-    return jsonResponse({ error: `Sender must match ${mailboxFrom}` }, 400);
+  if (mailboxFrom && !senderAllowedForMailbox(sender, mailboxFrom)) {
+    return jsonResponse({ error: `Sender must match ${mailboxFrom} or use the same domain alias` }, 400);
   }
   if (recipients.length === 0) {
     return jsonResponse({ error: 'At least one recipient is required' }, 400);
@@ -281,6 +314,7 @@ export default {
         ok: true,
         service: 'remotelab-email-worker',
         from: trimString(env.MAILBOX_FROM),
+        senderPolicy: 'exact_or_same_domain_alias',
         bridgeUrlConfigured: Boolean(trimString(env.MAILBOX_BRIDGE_URL)),
       });
     }

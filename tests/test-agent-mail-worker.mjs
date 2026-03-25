@@ -614,6 +614,110 @@ try {
   assert.equal(updatedRouted?.automation?.status, 'submitted_to_session');
   assert.equal(updatedRouted?.automation?.targetInstance, 'trial6');
   assert.equal(updatedRouted?.automation?.targetBaseUrl, `http://127.0.0.1:${port}`);
+
+  requests.length = 0;
+  sessionCreates.length = 0;
+  messageSubmissions.length = 0;
+
+  const localPartMailboxRoot = join(tempHome, '.config', 'remotelab', 'agent-mailbox-local-part');
+  initializeMailbox({
+    rootDir: localPartMailboxRoot,
+    name: 'Rowan',
+    localPart: 'rowan',
+    domain: 'example.com',
+    allowEmails: ['owner@example.com'],
+    instanceAddressMode: 'local_part',
+  });
+  saveMailboxAutomation(localPartMailboxRoot, {
+    allowlistAutoApprove: true,
+    chatBaseUrl: 'http://127.0.0.1:7690',
+    deliveryMode: 'reply_email',
+    session: {
+      folder: '~',
+      tool: 'codex',
+      group: 'Mail',
+      description: 'Inbound email',
+      systemPrompt: '',
+    },
+  });
+
+  const trial1AuthDir = join(tempHome, '.remotelab', 'instances', 'trial1', 'config');
+  const trial1AuthFile = join(trial1AuthDir, 'auth.json');
+  mkdirSync(trial1AuthDir, { recursive: true });
+  writeFileSync(trial1AuthFile, JSON.stringify({
+    token: 'trial1-auth-token',
+  }, null, 2));
+  writeFileSync(join(tempHome, '.config', 'remotelab', 'guest-instances.json'), JSON.stringify([
+    {
+      name: 'trial1',
+      authFile: trial1AuthFile,
+      localBaseUrl: `http://127.0.0.1:${port}`,
+    },
+  ], null, 2));
+
+  const localPartIngested = ingestRawMessage(
+    [
+      'From: owner@example.com',
+      'To: rowan@example.com',
+      'Subject: route to trial1 direct mailbox',
+      'Message-ID: <trial1-direct@example.com>',
+      'Content-Type: text/plain; charset=UTF-8',
+      '',
+      'this should reply from the direct trial1 address.',
+    ].join('\n'),
+    'trial1-direct.eml',
+    localPartMailboxRoot,
+    {
+      text: 'this should reply from the direct trial1 address.',
+      envelope: {
+        rcptTo: 'trial1@example.com',
+      },
+    },
+  );
+  const approvedLocalPart = findQueueItem(localPartIngested.id, localPartMailboxRoot)?.item;
+  assert.equal(approvedLocalPart?.routing?.instanceName, 'trial1');
+  assert.equal(approvedLocalPart?.message?.effectiveToAddress, 'trial1@example.com');
+
+  const localPartWorker = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(repoRoot, 'scripts', 'agent-mail-worker.mjs'), '--once', '--root', localPartMailboxRoot], {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: tempHome },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr || `worker exited with ${code}`));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+
+  const localPartSummary = JSON.parse(localPartWorker.stdout);
+  assert.equal(localPartSummary.processed, 1);
+  assert.equal(localPartSummary.failures.length, 0);
+  assert.equal(requests.length, 3);
+  assert.equal(sessionCreates.length, 1);
+  assert.equal(messageSubmissions.length, 1);
+  assert.equal(sessionCreates[0].completionTargets[0].from, 'trial1@example.com');
+  const localPartLoginRequest = requests.find((entry) => entry.method === 'GET' && entry.url.startsWith('/?token='));
+  assert.equal(new URL(localPartLoginRequest.url, 'http://127.0.0.1').searchParams.get('token'), 'trial1-auth-token');
+
+  const updatedLocalPart = findQueueItem(approvedLocalPart.id, localPartMailboxRoot)?.item;
+  assert.equal(updatedLocalPart?.status, 'processing_for_reply');
+  assert.equal(updatedLocalPart?.automation?.status, 'processing_for_reply');
+  assert.equal(updatedLocalPart?.automation?.targetInstance, 'trial1');
+  assert.equal(updatedLocalPart?.automation?.targetBaseUrl, `http://127.0.0.1:${port}`);
 } finally {
   server.close();
   rmSync(tempHome, { recursive: true, force: true });

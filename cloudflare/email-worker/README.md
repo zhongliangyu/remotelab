@@ -20,6 +20,7 @@ Flow:
 2. forward the raw message to the local mailbox bridge webhook
 3. accept authenticated `POST /api/send-email` requests from RemoteLab completion targets
 4. send replies through Cloudflare `send_email`
+5. allow the primary mailbox sender and same-domain instance aliases such as `trial1@example.com`
 
 ## Required config
 

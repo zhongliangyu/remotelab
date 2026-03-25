@@ -127,6 +127,39 @@ function normalizeBaseUrlMatch(value) {
   }
 }
 
+function normalizeEmailAddress(value) {
+  return trimString(value).toLowerCase();
+}
+
+function splitEmailAddressParts(value) {
+  const normalized = normalizeEmailAddress(value);
+  const atIndex = normalized.lastIndexOf('@');
+  if (atIndex === -1) {
+    return {
+      localPart: normalized,
+      domain: '',
+    };
+  }
+  return {
+    localPart: normalized.slice(0, atIndex),
+    domain: normalized.slice(atIndex + 1),
+  };
+}
+
+function resolveReplyFromAddress(item) {
+  const replyFrom = normalizeEmailAddress(item?.message?.effectiveToAddress)
+    || normalizeEmailAddress(item?.message?.envelopeToAddress)
+    || normalizeEmailAddress(item?.message?.toAddress);
+  const identityAddress = normalizeEmailAddress(item?.identity?.address);
+  if (!replyFrom || !identityAddress) return '';
+
+  const replyFromParts = splitEmailAddressParts(replyFrom);
+  const identityParts = splitEmailAddressParts(identityAddress);
+  if (!replyFromParts.localPart || !replyFromParts.domain) return '';
+  if (!identityParts.domain || replyFromParts.domain !== identityParts.domain) return '';
+  return replyFrom;
+}
+
 function sameBaseUrl(leftValue, rightValue) {
   const left = normalizeBaseUrlMatch(leftValue);
   const right = normalizeBaseUrlMatch(rightValue);
@@ -382,6 +415,7 @@ function buildCompletionTarget(item, rootDir, requestId) {
     type: 'email',
     requestId,
     to: trimString(item?.message?.fromAddress),
+    from: resolveReplyFromAddress(item),
     subject: buildReplySubject(item?.message?.subject),
     inReplyTo: messageId,
     references,

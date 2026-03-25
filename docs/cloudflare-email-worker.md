@@ -40,6 +40,7 @@ If any Cloudflare dashboard action is still needed, the AI should batch those as
 - Inline or attached email images are forwarded into RemoteLab sessions as normal file attachments for the agent to inspect.
 - Edge config stays thin so provider migration remains easy.
 - The Worker forwards the raw message plus the real envelope recipient (`rcptTo`), which lets the local mailbox route aliases such as `rowan+trial6@domain` or direct instance addresses such as `trial6@domain` into the matching guest instance.
+- The same Worker deployment can send from the primary mailbox address and same-domain instance aliases, so direct guest mailboxes such as `trial1@domain` do not need separate outbound Worker deployments.
 - On the host, the mailbox runtime registry should include both new guest-instance records and any still-running legacy `trial/trial2/...` runtimes; the legacy bare `trial` runtime may also be exposed as `trial1@domain` for compatibility.
 
 ## [HUMAN] steps

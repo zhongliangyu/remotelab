@@ -404,24 +404,27 @@ try {
     requestId: retryRequestId,
   }));
 
+  const retryCurlRequests = [];
   const forcedFailureDeliveries = await dispatchSessionEmailCompletionTargets(retrySession, retryRun, {
     fetchImpl: async () => {
       const error = new TypeError('fetch failed');
       error.cause = { code: 'UND_ERR_CONNECT_TIMEOUT' };
       throw error;
     },
+    sendCloudflareWorkerViaCurlImpl: async (request, prepared) => {
+      retryCurlRequests.push({ request, prepared });
+      return {
+        provider: prepared.provider,
+        authMode: 'bearer_token',
+        statusCode: 202,
+        response: { id: 'msg_retry_123', message: 'queued' },
+        summary: { id: 'msg_retry_123', message: 'queued' },
+      };
+    },
   });
   assert.equal(forcedFailureDeliveries.length, 1);
-  assert.equal(forcedFailureDeliveries[0].state, 'failed');
-
-  const failedRetryItem = findQueueItem(approvedRetry.id, mailboxRoot)?.item;
-  assert.equal(failedRetryItem?.status, 'reply_failed');
-  assert.equal(failedRetryItem?.automation?.status, 'reply_failed');
-  assert.equal(failedRetryItem?.automation?.lastError, 'fetch failed');
-
-  const successfulRetryDeliveries = await dispatchSessionEmailCompletionTargets(retrySession, retryRun);
-  assert.equal(successfulRetryDeliveries.length, 1);
-  assert.equal(successfulRetryDeliveries[0].state, 'sent');
+  assert.equal(forcedFailureDeliveries[0].state, 'sent');
+  assert.equal(retryCurlRequests.length, 1);
 
   const updatedRetryItem = findQueueItem(approvedRetry.id, mailboxRoot)?.item;
   assert.equal(updatedRetryItem?.status, 'reply_sent');
