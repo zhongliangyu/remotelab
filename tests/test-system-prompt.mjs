@@ -13,6 +13,10 @@ const context = await buildSystemContext({ sessionId: 'session-test-123' });
 
 assert.match(context, /Seed Layer — Editable Default Constitution/);
 assert.match(context, /editable seed layer, not permanent law/);
+assert.match(context, /access belongs to you, not automatically to the remote user/);
+assert.match(context, /User Access Boundary/);
+assert.match(context, /External or remote users interact through RemoteLab and explicitly exposed product surfaces/);
+assert.match(context, /A result that only exists locally on this machine is not yet a completed handoff to the user/);
 assert.match(context, /Template-Session-First Routing/);
 assert.match(context, /Manager Policy Boundary/);
 assert.match(context, /Treat provider runtimes such as Codex or Claude as execution engines/);

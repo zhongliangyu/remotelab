@@ -13,6 +13,7 @@ process.env.HOME = home;
 
 const {
   DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
+  MANAGER_RUNTIME_BOUNDARY_SECTION,
   MANAGER_TURN_POLICY_REMINDER,
   applyManagedRuntimeEnv,
   ensureManagedCodexHome,
@@ -79,6 +80,26 @@ try {
     'default Codex developer instructions should enforce state-first summaries and handoffs',
   );
   assert.match(
+    DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
+    /Machine access belongs to you, not automatically to the remote user/,
+    'default Codex developer instructions should distinguish agent machine access from user access',
+  );
+  assert.match(
+    DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
+    /local-only file is internal working state, not a completed handoff/,
+    'default Codex developer instructions should prevent local-only delivery from counting as completion',
+  );
+  assert.match(
+    MANAGER_RUNTIME_BOUNDARY_SECTION,
+    /host machine is your private execution surface, not the default user interface/,
+    'manager runtime boundary should define the host as the agent execution surface rather than the user interface',
+  );
+  assert.match(
+    MANAGER_RUNTIME_BOUNDARY_SECTION,
+    /Do not assume remote users can browse local folders, inspect this computer, or pick up files from host-only paths/,
+    'manager runtime boundary should block assumptions of direct host access for remote users',
+  );
+  assert.match(
     MANAGER_TURN_POLICY_REMINDER,
     /Do not mirror the manager prompt structure or provider-native report formatting back to the user by default/,
     'turn-level policy reminder should explicitly block prompt-structure mirroring',
@@ -92,6 +113,11 @@ try {
     MANAGER_TURN_POLICY_REMINDER,
     /lead with the current execution state, then whether the user is needed now or the work can stay parked for later/,
     'turn-level policy reminder should enforce state-first reorientation',
+  );
+  assert.match(
+    MANAGER_TURN_POLICY_REMINDER,
+    /Do not hand work back by telling the user to inspect a local path on the host machine/,
+    'turn-level policy reminder should block host-path handoff language',
   );
 
   console.log('test-runtime-policy: ok');
