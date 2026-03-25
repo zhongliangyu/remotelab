@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
 import { basename, extname, join } from 'path';
-import { rename } from 'fs/promises';
+import { copyFile, rename } from 'fs/promises';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import {
@@ -28,6 +28,7 @@ import {
 
 const FILE_ASSET_ID_PATTERN = /^fasset_[a-f0-9]{24}$/;
 const runFileAssetMutation = createSerialTaskQueue();
+const CHAT_FILE_ASSET_OBJECTS_DIR = join(CHAT_FILE_ASSETS_DIR, 'objects');
 
 function nowIso() {
   return new Date().toISOString();
@@ -138,6 +139,20 @@ function fileAssetPath(id) {
   return join(CHAT_FILE_ASSETS_DIR, `${id}.json`);
 }
 
+function buildLocalObjectFilename(assetId, originalName) {
+  const originalExtension = extname(originalName || '').toLowerCase();
+  if (/^\.[a-z0-9]+$/.test(originalExtension)) {
+    return `${assetId}${originalExtension}`;
+  }
+  return `${assetId}.bin`;
+}
+
+function resolveLocalObjectPath(record) {
+  const localFilename = normalizeString(record?.storage?.localFilename)
+    || buildLocalObjectFilename(record?.id || generateFileAssetId(), record?.originalName || 'attachment');
+  return join(CHAT_FILE_ASSET_OBJECTS_DIR, localFilename);
+}
+
 function buildObjectKey(sessionId, assetId, originalName) {
   const now = new Date();
   const year = String(now.getUTCFullYear());
@@ -208,6 +223,7 @@ function normalizeFileAssetRecord(record) {
   const id = normalizeString(record.id);
   if (!isValidFileAssetId(id)) return null;
   const sessionId = normalizeString(record.sessionId);
+  const storageProvider = normalizeString(record?.storage?.provider) || 's3-compatible';
   return {
     id,
     sessionId,
@@ -220,8 +236,9 @@ function normalizeFileAssetRecord(record) {
     sizeBytes: normalizePositiveInteger(record.sizeBytes),
     etag: normalizeString(record.etag),
     storage: {
-      provider: 's3-compatible',
+      provider: storageProvider === 'local' ? 'local' : 's3-compatible',
       objectKey: normalizeString(record?.storage?.objectKey),
+      localFilename: normalizeString(record?.storage?.localFilename),
     },
     localizedPath: normalizeString(record.localizedPath),
     localizedAt: normalizeString(record.localizedAt),
@@ -381,6 +398,12 @@ export async function finalizeFileAssetUpload(assetId, { sizeBytes, etag } = {})
 
 export async function buildFileAssetDirectUrl(recordOrId, { expiresInSeconds = FILE_ASSET_STORAGE_PRESIGN_TTL_SECONDS } = {}) {
   const record = await ensureReadyFileAssetRecord(recordOrId);
+  if (record.storage.provider === 'local') {
+    return {
+      url: buildDownloadRoute(record.id),
+      expiresAt: null,
+    };
+  }
   if (FILE_ASSET_PUBLIC_BASE_URL) {
     return {
       url: buildStorageObjectUrl(FILE_ASSET_PUBLIC_BASE_URL, record.storage.objectKey),
@@ -394,6 +417,19 @@ export async function localizeFileAsset(recordOrId) {
   const record = await ensureReadyFileAssetRecord(recordOrId);
   const existingPath = await reuseLocalizedPath(record);
   if (existingPath) return existingPath;
+
+  if (record.storage.provider === 'local') {
+    const localPath = resolveLocalObjectPath(record);
+    if (!await pathExists(localPath)) {
+      throw createError(`Failed to locate local file asset: ${record.id}`, 'FILE_ASSET_LOCAL_MISSING', 404);
+    }
+    const updated = await mutateFileAsset(record.id, (draft) => {
+      draft.localizedPath = localPath;
+      draft.localizedAt = draft.localizedAt || nowIso();
+      return true;
+    });
+    return normalizeString(updated?.localizedPath) || localPath;
+  }
 
   const direct = await buildFileAssetDirectUrl(record, {
     expiresInSeconds: Math.max(FILE_ASSET_STORAGE_PRESIGN_TTL_SECONDS, 60 * 60),
@@ -463,12 +499,50 @@ export async function publishLocalFileAssetFromPath({
   mimeType,
   createdBy = 'owner',
 } = {}) {
-  requireFileAssetStorageEnabled();
   const filePath = normalizeString(localPath);
   const fileStats = await statOrNull(filePath);
   if (!filePath || !fileStats?.isFile()) {
     throw createError('localPath must point to a file', 'FILE_ASSET_LOCAL_PATH_INVALID', 400);
   }
+
+  if (!FILE_ASSET_STORAGE_ENABLED) {
+    const normalizedSessionId = normalizeString(sessionId);
+    if (!normalizedSessionId) {
+      throw createError('sessionId is required', 'FILE_ASSET_SESSION_REQUIRED', 400);
+    }
+    const assetId = generateFileAssetId();
+    const createdAt = nowIso();
+    const displayName = sanitizeDisplayName(originalName || basename(filePath), 'attachment');
+    const localFilename = buildLocalObjectFilename(assetId, displayName);
+    const targetPath = join(CHAT_FILE_ASSET_OBJECTS_DIR, localFilename);
+    await ensureDir(CHAT_FILE_ASSET_OBJECTS_DIR);
+    await copyFile(filePath, targetPath);
+
+    const record = normalizeFileAssetRecord({
+      id: assetId,
+      sessionId: normalizedSessionId,
+      status: 'ready',
+      createdAt,
+      updatedAt: createdAt,
+      createdBy,
+      originalName: displayName,
+      mimeType: normalizeMimeType(mimeType),
+      sizeBytes: fileStats.size,
+      storage: {
+        provider: 'local',
+        localFilename,
+      },
+      localizedPath: targetPath,
+      localizedAt: createdAt,
+      uploadCompletedAt: createdAt,
+    });
+
+    await ensureDir(CHAT_FILE_ASSETS_DIR);
+    await writeJsonAtomic(fileAssetPath(assetId), record);
+    return buildClientFileAsset(record, { includeDirectUrl: true });
+  }
+
+  requireFileAssetStorageEnabled();
 
   const intent = await createFileAssetUploadIntent({
     sessionId,

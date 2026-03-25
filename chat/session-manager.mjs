@@ -521,6 +521,11 @@ function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeAttachmentSizeBytes(value) {
+  const numeric = Number.parseInt(String(value || ''), 10);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
 function expandHomePath(value) {
   const trimmed = trimString(value);
   if (!trimmed) return '';
@@ -744,10 +749,13 @@ function normalizePublishedResultAssetAttachments(assets = []) {
       const assetId = trimString(asset?.assetId || asset?.id);
       if (!assetId) return null;
       const originalName = sanitizeOriginalAttachmentName(asset?.originalName || '');
+      const sizeBytes = normalizeAttachmentSizeBytes(asset?.sizeBytes);
       return {
         assetId,
         ...(originalName ? { originalName } : {}),
         mimeType: resolveAttachmentMimeType(asset?.mimeType, originalName),
+        ...(sizeBytes ? { sizeBytes } : {}),
+        renderAs: 'file',
       };
     })
     .filter(Boolean);
@@ -788,6 +796,8 @@ function sanitizeQueuedFollowUpAttachments(images) {
       const assetId = typeof image?.assetId === 'string' ? image.assetId.trim() : '';
       const originalName = sanitizeOriginalAttachmentName(image?.originalName || '');
       const mimeType = resolveAttachmentMimeType(image?.mimeType, originalName || filename);
+      const sizeBytes = normalizeAttachmentSizeBytes(image?.sizeBytes);
+      const renderAs = trimString(image?.renderAs) === 'file' ? 'file' : '';
       if (!savedPath && !assetId) return null;
       return {
         ...(filename ? { filename } : {}),
@@ -795,6 +805,8 @@ function sanitizeQueuedFollowUpAttachments(images) {
         ...(assetId ? { assetId } : {}),
         ...(originalName ? { originalName } : {}),
         mimeType,
+        ...(sizeBytes ? { sizeBytes } : {}),
+        ...(renderAs ? { renderAs } : {}),
       };
     })
     .filter(Boolean);
@@ -840,6 +852,8 @@ function serializeQueuedFollowUp(entry) {
       ...(image?.assetId ? { assetId: image.assetId } : {}),
       ...(image?.originalName ? { originalName: image.originalName } : {}),
       ...(image?.mimeType ? { mimeType: image.mimeType } : {}),
+      ...(normalizeAttachmentSizeBytes(image?.sizeBytes) ? { sizeBytes: normalizeAttachmentSizeBytes(image.sizeBytes) } : {}),
+      ...(trimString(image?.renderAs) === 'file' ? { renderAs: 'file' } : {}),
     })),
   };
 }
@@ -1394,11 +1408,13 @@ export async function resolveSavedAttachments(images) {
     if (!await pathExists(savedPath)) return null;
     const originalName = sanitizeOriginalAttachmentName(image?.originalName || '');
     const mimeType = resolveAttachmentMimeType(image?.mimeType, originalName || filename);
+    const sizeBytes = normalizeAttachmentSizeBytes((await statOrNull(savedPath))?.size || image?.sizeBytes);
     return {
       filename,
       savedPath,
       ...(originalName ? { originalName } : {}),
       mimeType,
+      ...(sizeBytes ? { sizeBytes } : {}),
     };
   }));
   return resolved.filter(Boolean);
@@ -1422,6 +1438,7 @@ export async function saveAttachments(images) {
       savedPath: filepath,
       ...(originalName ? { originalName } : {}),
       mimeType,
+      ...(fileBuffer.length > 0 ? { sizeBytes: fileBuffer.length } : {}),
       ...(typeof img?.data === 'string' ? { data: img.data } : {}),
     };
   }));
@@ -2713,6 +2730,7 @@ async function maybePublishRunResultAssets(sessionId, run, manifest, normalizedE
           assetId: published.id,
           originalName: published.originalName || file.originalName,
           mimeType: published.mimeType || file.mimeType,
+          ...(normalizeAttachmentSizeBytes(published.sizeBytes) ? { sizeBytes: normalizeAttachmentSizeBytes(published.sizeBytes) } : {}),
         });
       } catch (error) {
         console.error(`[result-file-assets] Failed to publish ${file.localPath}: ${error?.message || error}`);
@@ -4275,6 +4293,8 @@ export async function submitHttpMessage(sessionId, text, images, options = {}) {
     ...(img.assetId ? { assetId: img.assetId } : {}),
     ...(img.originalName ? { originalName: img.originalName } : {}),
     mimeType: img.mimeType,
+    ...(normalizeAttachmentSizeBytes(img?.sizeBytes) ? { sizeBytes: normalizeAttachmentSizeBytes(img.sizeBytes) } : {}),
+    ...(trimString(img?.renderAs) === 'file' ? { renderAs: 'file' } : {}),
   }));
   const isFirstRecordedUserMessage =
     options.recordUserMessage !== false

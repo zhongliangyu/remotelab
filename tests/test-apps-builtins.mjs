@@ -69,12 +69,16 @@ try {
   assert.equal(welcomeApp?.shareEnabled, false);
   assert.equal(welcomeApp?.shareToken, undefined);
   assert.match(welcomeApp?.systemPrompt || '', /raw materials|files, screenshots|PowerPoints/i);
+  assert.match(welcomeApp?.systemPrompt || '', /fixed intake form|rigid template|prompt-writing lesson/i);
+  assert.match(welcomeApp?.systemPrompt || '', /new assistant receiving a handoff|report or spreadsheet cleanup|exports and imports/i);
   assert.match(welcomeApp?.systemPrompt || '', /project mechanics|project structure|folders, notes/i);
   assert.match(welcomeApp?.systemPrompt || '', /durable knowledge|repeat themselves/i);
   assert.match(welcomeApp?.systemPrompt || '', /task_card|hidden <private>|mode, summary, goal/i);
   assert.match(welcomeApp?.systemPrompt || '', /needsFromUser|rawMaterials|knownConclusions/i);
-  assert.match(welcomeApp?.welcomeMessage || '', /原始材料|Excel|PPT|项目方式/u);
-  assert.match(welcomeApp?.welcomeMessage || '', /记下关键背景|偏好|下一步/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /我是 Rowan|聊天工具|先接手、再梳理、再推进执行/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /报表\/表格整理|导出导入|文件批处理/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /prompt 想清楚|一次说齐|进入执行/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /最关键的一两个问题|现在就把这次的事和材料发来/u);
 
   const basicChatApp = await getApp(BASIC_CHAT_APP_ID);
   assert.equal(basicChatApp?.id, BASIC_CHAT_APP_ID);

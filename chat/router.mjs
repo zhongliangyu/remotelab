@@ -1,5 +1,5 @@
 import { readFile, readdir } from 'fs/promises';
-import { readFileSync, readdirSync, statSync, watch } from 'fs';
+import { createReadStream, readFileSync, readdirSync, statSync, watch } from 'fs';
 import { homedir } from 'os';
 import { join, resolve, dirname, basename, extname, relative, isAbsolute, sep } from 'path';
 import { parse as parseUrl, fileURLToPath } from 'url';
@@ -103,6 +103,7 @@ import {
   getFileAsset,
   getFileAssetBootstrapConfig,
   getFileAssetForClient,
+  localizeFileAsset,
 } from './file-assets.mjs';
 
 // Paths are resolved from the active runtime root on each request.
@@ -800,6 +801,18 @@ function buildHeaders(headers = {}) {
   };
 }
 
+function streamResponse(res, filepath, headers = {}) {
+  const stream = createReadStream(filepath);
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(500, buildHeaders({ 'Content-Type': 'application/json' }));
+    }
+    res.end(JSON.stringify({ error: 'Failed to read file' }));
+  });
+  res.writeHead(200, buildHeaders(headers));
+  stream.pipe(res);
+}
+
 function writeJson(res, statusCode, payload) {
   res.writeHead(statusCode, buildHeaders({ 'Content-Type': 'application/json' }));
   res.end(JSON.stringify(payload));
@@ -1354,6 +1367,14 @@ export async function handleRequest(req, res) {
     if (!requireSessionAccess(res, authSession, asset.sessionId)) return;
 
     try {
+      if (asset.storage?.provider === 'local') {
+        const localPath = await localizeFileAsset(asset);
+        streamResponse(res, localPath, {
+          'Content-Type': asset.mimeType || 'application/octet-stream',
+          'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
+        });
+        return;
+      }
       const direct = await buildFileAssetDirectUrl(asset);
       res.writeHead(302, buildHeaders({
         Location: direct.url,
@@ -1722,6 +1743,8 @@ export async function handleRequest(req, res) {
             mimeType: typeof image?.mimeType === 'string' && image.mimeType.trim()
               ? image.mimeType.trim()
               : asset.mimeType,
+            ...(Number.isInteger(asset?.sizeBytes) && asset.sizeBytes > 0 ? { sizeBytes: asset.sizeBytes } : {}),
+            ...(typeof image?.renderAs === 'string' && image.renderAs.trim() === 'file' ? { renderAs: 'file' } : {}),
           });
         }
         const preSavedAttachments = [

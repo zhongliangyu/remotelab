@@ -79,6 +79,9 @@ function getAttachmentSource(attachment) {
   if (typeof attachment?.objectUrl === "string" && attachment.objectUrl) {
     return attachment.objectUrl;
   }
+  if (typeof attachment?.downloadUrl === "string" && attachment.downloadUrl) {
+    return attachment.downloadUrl;
+  }
   if (typeof attachment?.assetId === "string" && attachment.assetId) {
     return `/api/assets/${encodeURIComponent(attachment.assetId)}/download`;
   }
@@ -101,8 +104,32 @@ function getAttachmentTypeLabel(attachment) {
   return "FILE";
 }
 
+function normalizeAttachmentSizeBytes(attachment) {
+  const numeric = Number.parseInt(String(attachment?.sizeBytes || ""), 10);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function formatAttachmentSize(sizeBytes) {
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) return "";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = sizeBytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded} ${units[unitIndex]}`;
+}
+
+function shouldRenderAttachmentAsFileCard(attachment) {
+  return attachment?.renderAs === "file" || getAttachmentKind(attachment) === "file";
+}
+
 function createAttachmentFileNode(attachment, { compact = false } = {}) {
   const label = getAttachmentDisplayName(attachment);
+  const sizeLabel = formatAttachmentSize(normalizeAttachmentSizeBytes(attachment));
   const fileEl = document.createElement("div");
   fileEl.className = compact ? "attachment-file attachment-file-compact" : "attachment-file";
   fileEl.title = label;
@@ -120,7 +147,9 @@ function createAttachmentFileNode(attachment, { compact = false } = {}) {
 
   const typeEl = document.createElement("div");
   typeEl.className = "attachment-file-type";
-  typeEl.textContent = getAttachmentTypeLabel(attachment);
+  typeEl.textContent = sizeLabel
+    ? `${getAttachmentTypeLabel(attachment)} · ${sizeLabel}`
+    : getAttachmentTypeLabel(attachment);
 
   metaEl.appendChild(nameEl);
   metaEl.appendChild(typeEl);
@@ -134,8 +163,9 @@ function createMessageAttachmentNode(attachment) {
   if (!source) return null;
   const kind = getAttachmentKind(attachment);
   const label = getAttachmentDisplayName(attachment);
+  const renderAsFileCard = shouldRenderAttachmentAsFileCard(attachment);
 
-  if (kind === "image") {
+  if (!renderAsFileCard && kind === "image") {
     const imgEl = document.createElement("img");
     imgEl.src = source;
     imgEl.alt = label;
@@ -144,7 +174,7 @@ function createMessageAttachmentNode(attachment) {
     return imgEl;
   }
 
-  if (kind === "video") {
+  if (!renderAsFileCard && kind === "video") {
     const videoEl = document.createElement("video");
     videoEl.src = source;
     videoEl.controls = true;
@@ -153,7 +183,7 @@ function createMessageAttachmentNode(attachment) {
     return videoEl;
   }
 
-  if (kind === "audio") {
+  if (!renderAsFileCard && kind === "audio") {
     const audioEl = document.createElement("audio");
     audioEl.src = source;
     audioEl.controls = true;
@@ -161,14 +191,23 @@ function createMessageAttachmentNode(attachment) {
     return audioEl;
   }
 
-  const link = document.createElement("a");
-  link.href = source;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  link.className = "attachment-link attachment-card";
-  link.title = label;
-  link.appendChild(createAttachmentFileNode(attachment));
-  return link;
+  const card = document.createElement("div");
+  card.className = "attachment-card attachment-card-row";
+  card.title = label;
+  card.appendChild(createAttachmentFileNode(attachment));
+
+  const downloadLink = document.createElement("a");
+  const downloadLabel = typeof t === "function" ? t("action.download") : "Download";
+  downloadLink.href = source;
+  downloadLink.target = "_blank";
+  downloadLink.rel = "noopener noreferrer";
+  downloadLink.className = "attachment-download-btn";
+  downloadLink.title = `${downloadLabel}: ${label}`;
+  downloadLink.download = label;
+  downloadLink.textContent = downloadLabel;
+
+  card.appendChild(downloadLink);
+  return card;
 }
 
 function createComposerAttachmentPreviewNode(attachment) {

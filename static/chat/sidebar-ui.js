@@ -65,6 +65,7 @@ function buildPendingAttachment(file) {
     file,
     originalName: typeof file?.name === "string" ? file.name : "",
     mimeType: file.type || "application/octet-stream",
+    ...(Number.isFinite(file?.size) ? { sizeBytes: file.size } : {}),
     objectUrl: URL.createObjectURL(file),
   };
 }
@@ -74,7 +75,6 @@ async function addAttachmentFiles(files) {
     return;
   }
   for (const file of files) {
-    if (pendingImages.length >= 4) break;
     pendingImages.push(buildPendingAttachment(file));
   }
   renderImagePreviews();

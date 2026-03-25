@@ -62,7 +62,7 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'remotelab-http-result-file-assets-'));
+  const home = mkdtempSync(join(tmpdir(), 'remotelab-http-result-file-assets-local-'));
   const configDir = join(home, '.config', 'remotelab');
   const localBin = join(home, '.local', 'bin');
   const videoCutDir = join(home, 'code', 'video-cut');
@@ -104,7 +104,7 @@ const { join } = require('path');
 const outputDir = join(process.env.HOME, 'code', 'video-cut');
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(join(outputDir, 'rough cut.mp4'), 'rendered-video-asset', 'utf8');
-console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-result-file-assets' }));
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-result-file-assets-local' }));
 console.log(JSON.stringify({ type: 'turn.started' }));
 console.log(JSON.stringify({
   type: 'item.completed',
@@ -128,51 +128,7 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
   return { home };
 }
 
-function startMockStorageServer(port) {
-  const objects = new Map();
-  const server = http.createServer((req, res) => {
-    const parsed = new URL(req.url || '/', `http://127.0.0.1:${port}`);
-    const key = parsed.pathname;
-    if (req.method === 'PUT') {
-      const chunks = [];
-      req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      req.on('end', () => {
-        objects.set(key, {
-          body: Buffer.concat(chunks),
-          contentType: req.headers['content-type'] || 'application/octet-stream',
-        });
-        res.writeHead(200, { ETag: 'mock-etag' });
-        res.end('ok');
-      });
-      return;
-    }
-
-    if (req.method === 'GET') {
-      const object = objects.get(key);
-      if (!object) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found');
-        return;
-      }
-      res.writeHead(200, {
-        'Content-Type': object.contentType,
-        'Content-Length': String(object.body.length),
-      });
-      res.end(object.body);
-      return;
-    }
-
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method not allowed');
-  });
-
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve({ server, objects }));
-  });
-}
-
-async function startServer({ home, port, storagePort }) {
+async function startServer({ home, port }) {
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
@@ -180,10 +136,6 @@ async function startServer({ home, port, storagePort }) {
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      REMOTELAB_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
-      REMOTELAB_ASSET_STORAGE_REGION: 'auto',
-      REMOTELAB_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
-      REMOTELAB_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -220,9 +172,7 @@ async function waitForRunTerminal(port, runId) {
 try {
   const { home } = setupTempHome();
   const port = randomPort();
-  const storagePort = randomPort();
-  const { server: storageServer } = await startMockStorageServer(storagePort);
-  const chatServer = await startServer({ home, port, storagePort });
+  const chatServer = await startServer({ home, port });
 
   try {
     const createSessionRes = await request(port, 'POST', '/api/sessions', {
@@ -281,18 +231,15 @@ try {
       headers: { Cookie: cookie },
       redirect: 'manual',
     });
-    assert.equal(downloadRes.status, 302, 'download route should redirect to object storage');
-
-    const redirected = await fetch(String(downloadRes.headers.get('location') || ''), { method: 'GET' });
-    assert.equal(redirected.status, 200, 'redirected object-storage download should succeed');
-    assert.equal(await redirected.text(), 'rendered-video-asset', 'redirected object-storage download should return the exported file');
+    assert.equal(downloadRes.status, 200, 'download route should stream the local file asset');
+    assert.match(downloadRes.headers.get('content-type') || '', /^video\/mp4/, 'local result download should preserve mime type');
+    assert.equal(await downloadRes.text(), 'rendered-video-asset', 'local download should return the exported file');
   } finally {
     await stopServer(chatServer);
-    await new Promise((resolve) => storageServer.close(resolve));
     rmSync(home, { recursive: true, force: true });
   }
 
-  console.log('test-http-result-file-assets: ok');
+  console.log('test-http-result-file-assets-local: ok');
 } catch (error) {
   console.error(error);
   process.exit(1);

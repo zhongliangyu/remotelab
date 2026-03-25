@@ -95,6 +95,9 @@ const functionsToLoad = [
   'getAttachmentKind',
   'getAttachmentSource',
   'getAttachmentTypeLabel',
+  'normalizeAttachmentSizeBytes',
+  'formatAttachmentSize',
+  'shouldRenderAttachmentAsFileCard',
   'createAttachmentFileNode',
   'createMessageAttachmentNode',
   'createComposerAttachmentPreviewNode',
@@ -125,14 +128,30 @@ const genericMessageNode = context.createMessageAttachmentNode({
   filename: 'stored-report.csv',
   originalName: 'report.csv',
   mimeType: 'text/csv',
+  sizeBytes: 2048,
 });
-assert.equal(genericMessageNode.tagName, 'A', 'generic message attachments should render as links');
+assert.equal(genericMessageNode.tagName, 'DIV', 'generic message attachments should render as attachment rows');
 assert.ok(genericMessageNode.className.includes('attachment-card'), 'generic message attachments should render as file cards');
-assert.equal(genericMessageNode.href, '/api/media/stored-report.csv', 'generic message attachment should point at the media route');
-assert.equal(genericMessageNode.children.length, 1, 'generic file card should include an inner preview node');
+assert.equal(genericMessageNode.children.length, 2, 'generic file card should include file details and a download action');
 assert.equal(genericMessageNode.children[0].className, 'attachment-file', 'generic file card should reuse the attachment file shell');
 assert.equal(genericMessageNode.children[0].children[1].children[0].textContent, 'report.csv', 'generic file card should show the original file name');
-assert.equal(genericMessageNode.children[0].children[1].children[1].textContent, 'CSV', 'generic file card should show a file type label');
+assert.equal(genericMessageNode.children[0].children[1].children[1].textContent, 'CSV · 2 KB', 'generic file card should show file type and size');
+assert.equal(genericMessageNode.children[1].tagName, 'A', 'generic file card should include a download link');
+assert.equal(genericMessageNode.children[1].href, '/api/media/stored-report.csv', 'generic message attachment should point at the media route');
+assert.equal(genericMessageNode.children[1].download, 'report.csv', 'generic message attachment should preserve the download filename');
+assert.equal(genericMessageNode.children[1].textContent, 'Download', 'generic file card should show an explicit download action');
+
+const resultAssetNode = context.createMessageAttachmentNode({
+  assetId: 'fasset_result_video',
+  originalName: 'rough cut.mp4',
+  mimeType: 'video/mp4',
+  sizeBytes: 4096,
+  renderAs: 'file',
+});
+assert.equal(resultAssetNode.tagName, 'DIV', 'result file assets should render as attachment rows');
+assert.equal(resultAssetNode.children[0].children[1].children[0].textContent, 'rough cut.mp4', 'result attachment row should show the exported file name');
+assert.equal(resultAssetNode.children[0].children[1].children[1].textContent, 'MP4 · 4 KB', 'result attachment row should show file size metadata');
+assert.equal(resultAssetNode.children[1].href, '/api/assets/fasset_result_video/download', 'result attachment row should use the asset download route');
 
 const genericComposerPreview = context.createComposerAttachmentPreviewNode({
   objectUrl: 'blob:report',

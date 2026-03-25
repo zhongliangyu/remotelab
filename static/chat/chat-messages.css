@@ -118,23 +118,28 @@
   padding: 4px;
   cursor: default;
 }
-.msg-images .attachment-link {
+.msg-images .attachment-card {
   display: inline-flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text);
   text-decoration: none;
+  width: min(320px, 100%);
+  max-width: 320px;
+  border-radius: 12px;
 }
-.msg-images .attachment-card {
-  width: min(220px, 100%);
-  max-width: 220px;
+.msg-images .attachment-link {
   cursor: pointer;
 }
 .msg-images .attachment-card:hover {
   background: var(--surface-hover);
   border-color: var(--border-strong);
+}
+.attachment-card-row .attachment-file {
+  flex: 1;
 }
 .attachment-file {
   display: flex;
@@ -162,6 +167,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 .msg-images .attachment-card .attachment-file-name {
@@ -175,6 +181,25 @@
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+.attachment-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 68px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.attachment-download-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 /* Pending (optimistic) message — subtle sending indicator */

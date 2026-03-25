@@ -188,7 +188,7 @@ try {
       welcomeStarterEvent,
       { Cookie: ownerCookie },
     );
-    assert.match(welcomeStarterContent, /原始材料|Excel|PPT|重复操作/u);
+    assert.match(welcomeStarterContent, /我是 Rowan|报表\/表格整理|prompt 想清楚|最关键的一两个问题/u);
 
     const createAppSession = await request(port, 'POST', '/api/sessions', {
       folder: repoRoot,
