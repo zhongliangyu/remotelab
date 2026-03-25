@@ -55,6 +55,7 @@ The first goal is concrete: in a short conversation, help a user hand off a tedi
 
 - The biggest unmet need is not encouraging people to open endless concurrent sessions; it is finding repetitive work that is actually worth automating.
 - Most target users are not AI-native operators and do not arrive with product-manager-grade prompts; the AI needs to help clarify the task, gather examples, and design a workable approach.
+- The product should absorb most of the operational complexity: tool choice, model choice, session structure, and machine-side execution are implementation details unless the user explicitly needs to care.
 - The first high-fit user slice is not literally everyone with a computer; it looks more like time-pressed middle managers / owner-operators in traditional industries who both coordinate others and still personally carry repetitive digital admin work.
 - The first screen cannot be a blank session list. New users need a default `Welcome App` that briefly explains what RemoteLab can do, asks about their role and repetitive-work pain point, and guides them toward one concrete first automation.
 - The best wedge is simple, fast-payback digital work: data cleanup, analysis, file processing, reports, notifications, and other repetitive scriptable tasks.
@@ -152,7 +153,7 @@ The best pattern is one early handoff: the agent asks for everything it needs in
 **Open a fresh terminal on the host machine, start Codex or another coding agent, and paste this:**
 
 ```text
-I want to set up RemoteLab on this machine so I can control AI workers from any device and keep long-running AI work organized.
+I want to set up RemoteLab on this machine so I can hand repetitive digital work to AI from any device and let it automate the work on a real computer.
 
 Network mode: [cloudflare | tailscale]
 

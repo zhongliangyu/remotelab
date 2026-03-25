@@ -8,7 +8,7 @@ The human's default job is simple: open a fresh terminal on the target machine, 
 ## Copy this prompt
 
 ```text
-I want you to set up RemoteLab on this machine so I can control AI coding tools from my phone.
+I want you to set up RemoteLab on this machine so I can hand repetitive digital work to AI from phone or desktop and let it automate the work on a real computer.
 
 Network mode: [cloudflare | tailscale]
 
@@ -17,7 +17,7 @@ Domain: [YOUR_DOMAIN]
 Subdomain: [SUBDOMAIN]
 
 # For Tailscale mode:
-(No extra config needed — both phone and dev machine must have Tailscale installed and joined to the same tailnet.)
+(No extra config needed — the host machine and the client devices I want to use are on the same tailnet.)
 
 Use `https://raw.githubusercontent.com/Ninglo/remotelab/main/docs/setup.md` as the setup contract.
 Do not assume the repo is already cloned. If `~/code/remotelab` does not exist yet, fetch this contract, clone `https://github.com/Ninglo/remotelab.git` yourself, and continue.

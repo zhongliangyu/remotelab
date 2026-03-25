@@ -155,7 +155,7 @@ RemoteLab 在几个点上是刻意有立场的：
 **在宿主机开一个新的终端，启动 Codex 或其他 coding agent，然后粘贴这段 prompt：**
 
 ```text
-我想在这台机器上配置 RemoteLab，这样我就能从不同设备控制 AI worker，并把长时间运行的 AI 工作组织起来。
+我想在这台机器上配置 RemoteLab，这样我就能从不同设备把重复数字工作交给 AI，并让它在真实机器上完成自动化。
 
 网络模式：[cloudflare | tailscale]
 

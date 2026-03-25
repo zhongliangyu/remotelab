@@ -15,9 +15,9 @@ Read these first when you need the current truth:
 2. `../README.md` / `../README.zh.md` — product framing, setup path, operator-facing expectations
 3. `project-architecture.md` — current shipped architecture and code map
 4. `../notes/current/core-domain-contract.md` — current domain/refactor baseline
-5. `../notes/current/session-first-workflow-surfaces.md` — current workflow-organization contract for session list / grouping / task-like views
-6. `../notes/current/product-surface-lifecycle.md` — current keep/iterate/retire rule for shipped product surfaces
-7. `setup.md` / `external-message-protocol.md` / other focused guides as needed
+5. `../notes/current/product-surface-lifecycle.md` — current keep/iterate/retire rule for shipped product surfaces
+6. `setup.md` / `external-message-protocol.md` / other focused guides as needed
+7. `../notes/current/session-first-workflow-surfaces.md` — internal workflow-organization contract for session list / grouping / task-like views
 
 ## Keep These In Sync
 
@@ -40,6 +40,7 @@ For setup, deployment, connector, and feature-rollout docs, assume the operator 
 - a good doc includes the prompt, one-round input packet, target state, exact config artifacts or paths, and concise validation
 - avoid full command-by-command walkthroughs for steps the AI can execute or repair on its own
 - write for low-interruption handoff: the human should usually be able to answer once, walk away, and return only for approvals, browser-only actions, checks, or final handoff
+- in product-facing docs, lead with the user problem and payoff: helping ordinary people hand repetitive digital work to AI with low operational overhead; session/app/orchestration terms belong later unless the doc is explicitly about architecture
 
 ## What Lives In `docs/`
 
@@ -49,8 +50,11 @@ For setup, deployment, connector, and feature-rollout docs, assume the operator 
 - `setup.md` — model-first setup contract, one-round input handoff, human checkpoints, and target state
 - `external-message-protocol.md` — canonical integration contract for external channels
 - `creating-apps.md` — user/developer guide for Apps
-- `../notes/current/session-first-workflow-surfaces.md` — current rule that workflow-organization views stay session-first
+
+### Supporting Internal Contracts
+
 - `../notes/current/product-surface-lifecycle.md` — current rule that shipped features stay reviewable and may later be simplified or retired
+- `../notes/current/session-first-workflow-surfaces.md` — current workflow-organization rule for session list / grouping / task-like views
 
 ### Focused Integrations
 

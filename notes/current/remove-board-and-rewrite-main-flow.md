@@ -2,6 +2,8 @@
 
 Status: current decision record as of 2026-03-18
 
+Product framing note: this is a workflow-organization decision record, not the canonical product headline. For current product positioning, use `README.md`, `README.zh.md`, and `notes/directional/product-vision.md`.
+
 Related notes:
 
 - `notes/current/capability-first-shipping-plan.md`
@@ -20,13 +22,13 @@ Related notes:
 - The current board keeps pulling discussion toward columns, cards, and local UI tweaks instead of the interaction we actually want.
 - The shipped board is not mature enough to deserve product-center status.
 - Keeping it half-alive creates design gravity: people keep asking how to improve `Board` instead of whether `Board` should exist at all.
-- What RemoteLab actually wants to become is a coherent multi-session AI collaboration environment, not a kanban wrapper around chat threads.
+- What RemoteLab actually wants to become is a coherent AI automation workbench that helps ordinary people hand repetitive digital work to AI; the session-first core exists to support that workflow, not to replace the headline.
 
 ## What this decision does not change
 
 - `Session` remains the canonical durable work object.
 - We still do **not** introduce a separate durable `Task` object.
-- Multi-session fan-out remains a core capability.
+- Multi-session fan-out remains an important capability when the workflow needs it, but it is not the primary product promise.
 - Cross-session context freshness becomes more important, not less.
 - Context carry must stay bounded, inspectable, and cheap enough to trust.
 
