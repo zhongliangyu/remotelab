@@ -171,7 +171,7 @@ try {
   assert.equal(convergeOutput[0].dryRun, true);
   assert.equal(convergeOutput[0].previousChatServerPath, '/Users/example/code/remotelab-trial-runtime/chat-server.mjs');
   assert.equal(convergeOutput[0].publicBaseUrl, 'https://trial.example.com');
-  assert.match(convergeOutput[0].nextChatServerPath, /\/code\/remotelab\/chat-server\.mjs$/);
+  assert.equal(convergeOutput[0].nextChatServerPath, join(repoRoot, 'chat-server.mjs'));
   assert.equal(convergeOutput[0].nextWorkingDirectory, repoRoot);
 } finally {
   rmSync(sandboxHome, { recursive: true, force: true });
