@@ -5,7 +5,7 @@ import { join, resolve, dirname, basename, extname, relative, isAbsolute, sep } 
 import { parse as parseUrl, fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
-import { SESSION_EXPIRY, CHAT_IMAGES_DIR, SECURE_COOKIES } from '../lib/config.mjs';
+import { SESSION_EXPIRY, CHAT_IMAGES_DIR, FILE_ASSET_STORAGE_ENABLED, SECURE_COOKIES } from '../lib/config.mjs';
 import {
   sessions, saveAuthSessionsAsync,
   verifyTokenAsync, verifyPasswordAsync, generateToken,
@@ -410,11 +410,47 @@ async function resolveRequestedSessionAttachments(authSession, requestedAttachme
     });
   }
 
+  const savedUploadedAttachments = uploadedAttachments.length > 0
+    ? await saveAttachments(uploadedAttachments)
+    : [];
+  const normalizedUploadedAttachments = await maybePublishSavedAttachmentsToFileAssets(savedUploadedAttachments, {
+    sessionId,
+    createdBy,
+  });
+
   return [
     ...(await resolveSavedAttachments(existingAttachments)),
-    ...(uploadedAttachments.length > 0 ? await saveAttachments(uploadedAttachments) : []),
+    ...normalizedUploadedAttachments,
     ...externalAssetAttachments,
   ];
+}
+
+async function maybePublishSavedAttachmentsToFileAssets(savedAttachments = [], options = {}) {
+  if (!FILE_ASSET_STORAGE_ENABLED) return savedAttachments;
+
+  const sessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : '';
+  if (!sessionId || savedAttachments.length === 0) return savedAttachments;
+
+  try {
+    return await Promise.all(savedAttachments.map(async (attachment) => {
+      const published = await publishLocalFileAssetFromPath({
+        sessionId,
+        localPath: attachment.savedPath,
+        originalName: attachment.originalName,
+        mimeType: attachment.mimeType,
+        createdBy: options?.createdBy,
+      });
+      return {
+        assetId: published.id,
+        originalName: published.originalName || attachment.originalName,
+        mimeType: published.mimeType || attachment.mimeType,
+        ...(Number.isInteger(published?.sizeBytes) && published.sizeBytes > 0 ? { sizeBytes: published.sizeBytes } : {}),
+      };
+    }));
+  } catch (error) {
+    console.warn('Failed to offload uploaded attachments to object storage; keeping local attachments.', error);
+    return savedAttachments;
+  }
 }
 
 async function readVoiceCleanupPayload(req) {

@@ -7,12 +7,14 @@ import { pipeline } from 'stream/promises';
 import {
   CHAT_FILE_ASSETS_DIR,
   CHAT_FILE_ASSET_CACHE_DIR,
+  FILE_ASSET_DIRECT_UPLOAD_ENABLED,
   FILE_ASSET_PUBLIC_BASE_URL,
   FILE_ASSET_STORAGE_ACCESS_KEY_ID,
   FILE_ASSET_STORAGE_BASE_URL,
   FILE_ASSET_STORAGE_ENABLED,
   FILE_ASSET_STORAGE_KEY_PREFIX,
   FILE_ASSET_STORAGE_PRESIGN_TTL_SECONDS,
+  FILE_ASSET_STORAGE_PROVIDER,
   FILE_ASSET_STORAGE_REGION,
   FILE_ASSET_STORAGE_SECRET_ACCESS_KEY,
 } from '../lib/config.mjs';
@@ -29,6 +31,32 @@ import {
 const FILE_ASSET_ID_PATTERN = /^fasset_[a-f0-9]{24}$/;
 const runFileAssetMutation = createSerialTaskQueue();
 const CHAT_FILE_ASSET_OBJECTS_DIR = join(CHAT_FILE_ASSETS_DIR, 'objects');
+const STORAGE_SIGNING_PROFILES = Object.freeze({
+  s3: Object.freeze({
+    algorithm: 'AWS4-HMAC-SHA256',
+    queryAlgorithmKey: 'X-Amz-Algorithm',
+    queryCredentialKey: 'X-Amz-Credential',
+    queryDateKey: 'X-Amz-Date',
+    queryExpiresKey: 'X-Amz-Expires',
+    querySignatureKey: 'X-Amz-Signature',
+    querySignedHeadersKey: 'X-Amz-SignedHeaders',
+    service: 's3',
+    requestTerminator: 'aws4_request',
+    secretPrefix: 'AWS4',
+  }),
+  tos: Object.freeze({
+    algorithm: 'TOS4-HMAC-SHA256',
+    queryAlgorithmKey: 'X-Tos-Algorithm',
+    queryCredentialKey: 'X-Tos-Credential',
+    queryDateKey: 'X-Tos-Date',
+    queryExpiresKey: 'X-Tos-Expires',
+    querySignatureKey: 'X-Tos-Signature',
+    querySignedHeadersKey: 'X-Tos-SignedHeaders',
+    service: 'tos',
+    requestTerminator: 'request',
+    secretPrefix: '',
+  }),
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -95,11 +123,15 @@ function hmacDigest(key, value) {
   return createHmac('sha256', key).update(value).digest();
 }
 
-function buildSigningKey(shortDate) {
-  const kDate = hmacDigest(`AWS4${FILE_ASSET_STORAGE_SECRET_ACCESS_KEY}`, shortDate);
+function getStorageSigningProfile() {
+  return STORAGE_SIGNING_PROFILES[FILE_ASSET_STORAGE_PROVIDER] || STORAGE_SIGNING_PROFILES.s3;
+}
+
+function buildSigningKey(shortDate, profile = getStorageSigningProfile()) {
+  const kDate = hmacDigest(`${profile.secretPrefix}${FILE_ASSET_STORAGE_SECRET_ACCESS_KEY}`, shortDate);
   const kRegion = hmacDigest(kDate, FILE_ASSET_STORAGE_REGION);
-  const kService = hmacDigest(kRegion, 's3');
-  return hmacDigest(kService, 'aws4_request');
+  const kService = hmacDigest(kRegion, profile.service);
+  return hmacDigest(kService, profile.requestTerminator);
 }
 
 function formatAmzDate(date = new Date()) {
@@ -177,17 +209,18 @@ function buildStorageObjectUrl(baseUrl, objectKey) {
 function presignStorageRequest(method, objectUrl, expiresInSeconds = FILE_ASSET_STORAGE_PRESIGN_TTL_SECONDS) {
   requireFileAssetStorageEnabled();
 
+  const signingProfile = getStorageSigningProfile();
   const url = new URL(objectUrl);
   const issuedAt = new Date();
   const amzDate = formatAmzDate(issuedAt);
   const shortDate = amzDate.slice(0, 8);
-  const credentialScope = `${shortDate}/${FILE_ASSET_STORAGE_REGION}/s3/aws4_request`;
+  const credentialScope = `${shortDate}/${FILE_ASSET_STORAGE_REGION}/${signingProfile.service}/${signingProfile.requestTerminator}`;
   const query = new URLSearchParams(url.search);
-  query.set('X-Amz-Algorithm', 'AWS4-HMAC-SHA256');
-  query.set('X-Amz-Credential', `${FILE_ASSET_STORAGE_ACCESS_KEY_ID}/${credentialScope}`);
-  query.set('X-Amz-Date', amzDate);
-  query.set('X-Amz-Expires', String(expiresInSeconds));
-  query.set('X-Amz-SignedHeaders', 'host');
+  query.set(signingProfile.queryAlgorithmKey, signingProfile.algorithm);
+  query.set(signingProfile.queryCredentialKey, `${FILE_ASSET_STORAGE_ACCESS_KEY_ID}/${credentialScope}`);
+  query.set(signingProfile.queryDateKey, amzDate);
+  query.set(signingProfile.queryExpiresKey, String(expiresInSeconds));
+  query.set(signingProfile.querySignedHeadersKey, 'host');
 
   const canonicalRequest = [
     method.toUpperCase(),
@@ -199,17 +232,17 @@ function presignStorageRequest(method, objectUrl, expiresInSeconds = FILE_ASSET_
   ].join('\n');
 
   const stringToSign = [
-    'AWS4-HMAC-SHA256',
+    signingProfile.algorithm,
     amzDate,
     credentialScope,
     sha256Hex(canonicalRequest),
   ].join('\n');
 
-  const signature = createHmac('sha256', buildSigningKey(shortDate))
+  const signature = createHmac('sha256', buildSigningKey(shortDate, signingProfile))
     .update(stringToSign)
     .digest('hex');
 
-  query.set('X-Amz-Signature', signature);
+  query.set(signingProfile.querySignatureKey, signature);
   url.search = canonicalQuery(query.entries());
 
   return {
@@ -316,8 +349,8 @@ async function buildClientFileAsset(record, { includeDirectUrl = false } = {}) {
 export function getFileAssetBootstrapConfig() {
   return {
     enabled: FILE_ASSET_STORAGE_ENABLED,
-    directUpload: FILE_ASSET_STORAGE_ENABLED,
-    provider: FILE_ASSET_STORAGE_ENABLED ? 's3-compatible' : '',
+    directUpload: FILE_ASSET_DIRECT_UPLOAD_ENABLED,
+    provider: FILE_ASSET_STORAGE_ENABLED ? FILE_ASSET_STORAGE_PROVIDER : '',
   };
 }
 
