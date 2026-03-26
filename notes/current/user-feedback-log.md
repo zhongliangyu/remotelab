@@ -1,6 +1,6 @@
 # Shared User Feedback Log
 
-Status: active evidence log as of 2026-03-25
+Status: active evidence log as of 2026-03-26
 
 Companion operating note: `notes/current/product-mainline.md`
 
@@ -20,6 +20,16 @@ Directional synthesis: `notes/directional/product-vision.md`
 - When a signal becomes stable product direction, promote it into `notes/directional/product-vision.md`, `README.md`, `README.zh.md`, or a current execution note.
 
 ## Current carried-forward signals
+
+### 2026-03-26 — shrink product concepts before refactoring deeper
+
+- Source: direct product strategy discussion after parallel architecture review
+- User slice: owner/operator using RemoteLab as a single-owner AI workbench
+- Observed friction or ask: `App`, `User`, and interactive `Visitor` concepts add conceptual and implementation weight without enough real pull, while `Welcome` as an App feels artificial compared with a normal seeded session
+- Signal: the near-term product should contract toward owner sessions, runs, and read-only share snapshots; onboarding should use a normal session or injected first assistant message, not a special App object
+- Product implication: remove app/user CRUD, filters, visitor entry flow, and welcome-app framing before deeper backend/frontend refactor so later cleanup targets a smaller and clearer product truth
+- Promote to: `notes/current/product-mainline.md`, `notes/current/session-first-product-contraction.md`, `notes/current/core-domain-refactor-todo.md`
+- Follow-up: first removal wave should target sidebar filters/settings, app/user routes, visitor entry flow, and welcome bootstrap
 
 ### 2026-03-26 — attachment entry should use clear upload wording, not icon-only affordance
 

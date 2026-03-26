@@ -1,6 +1,6 @@
 # Product Mainline + Feedback Loop
 
-Status: current operating plan as of 2026-03-25
+Status: current operating plan as of 2026-03-26
 
 Directional companion: `notes/directional/product-vision.md`
 
@@ -8,6 +8,7 @@ Execution companions:
 
 - `notes/current/session-main-flow-next-push.md`
 - `notes/current/capability-first-shipping-plan.md`
+- `notes/current/session-first-product-contraction.md`
 
 Evidence log: `notes/current/user-feedback-log.md`
 
@@ -23,7 +24,8 @@ Evidence log: `notes/current/user-feedback-log.md`
 - Use onboarding, support, and product-review conversations as product discovery, not just as one-off troubleshooting.
 - Optimize for one concrete automation win: take one recurring digital chore from a vague description to a trusted result on a real machine.
 - Let repeated user evidence outrank internally elegant abstractions when the two conflict.
-- Treat multi-session orchestration, context carry, `App` packaging, and other higher-order capabilities as support layers unless user evidence clearly pulls them forward.
+- Prefer owner sessions plus read-only share snapshots over product-facing `App` / `User` abstractions during the current simplification phase.
+- Treat multi-session orchestration, context carry, reusable packaging, and other higher-order capabilities as support layers unless user evidence clearly pulls them forward again.
 
 ## Working loop
 

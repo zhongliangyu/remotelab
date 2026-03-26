@@ -8,9 +8,12 @@
 > - `notes/current/core-domain-contract.md`
 > - `notes/current/core-domain-implementation-mapping.md`
 > - `notes/current/core-domain-session-prompts.md`
+> - `notes/current/session-first-product-contraction.md`
 >
 > This note is intentionally action-oriented.
 > It does not redefine the product model; it decomposes the work needed to move the codebase toward that model.
+
+> Update 2026-03-26: the current product simplification pass explicitly reopens part of the older app/principal-heavy direction. For near-term product-facing work, read this note together with `notes/current/session-first-product-contraction.md` and let the contraction note win when the two disagree.
 
 ---
 
@@ -35,7 +38,7 @@ If two slices overlap heavily, finish the upstream one first instead of merging 
 
 ### 1. Contract first, code second
 
-If current code conflicts with `notes/current/core-domain-contract.md`, treat the contract as the target shape unless we explicitly reopen the decision.
+If current code conflicts with `notes/current/core-domain-contract.md`, treat the contract as the target shape unless we explicitly reopen the decision. For the current simplification phase, `notes/current/session-first-product-contraction.md` is the explicit reopen.
 
 ### 2. Prefer one dominant surface per session
 
@@ -92,17 +95,19 @@ When a slice changes behavior, validation should match the object boundary being
 
 The highest-leverage sequence is:
 
-1. default app + principal groundwork
-2. session ownership and access-scoping helpers
-3. app entry flow cleanup
-4. share snapshot contract cleanup
-5. run/session boundary cleanup
-6. derived UI + frontend surface cleanup
-7. docs terminology sweep + regression harness tightening
+1. app/user/visitor surface subtraction
+2. owner access + public snapshot simplification
+3. share snapshot contract cleanup
+4. run/session boundary cleanup
+5. derived UI + frontend surface cleanup
+6. docs terminology sweep + regression harness tightening
+7. delayed storage-field cleanup after compatibility holds
 
 ---
 
 ## Ready-Now Menu
+
+This menu predates the 2026-03-26 product-contraction decision. Use the updated sequence above first for current product-surface work. The detailed slices below remain most useful for compatibility cleanup and backend boundary tightening that still survives the contraction.
 
 This section answers a practical question:
 
