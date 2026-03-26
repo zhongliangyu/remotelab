@@ -100,9 +100,23 @@
 }
 .compact-btn:hover { border-color: var(--border-strong); color: var(--text-secondary); }
 .input-config-row .img-btn {
-  width: 26px; height: 26px; border-radius: 5px; border: 1px solid var(--border);
-  background: transparent; color: var(--text-muted); font-size: 14px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  min-height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); font-size: 12px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  flex-shrink: 0; white-space: nowrap; font-family: inherit;
+}
+.input-config-row .img-btn:hover { border-color: var(--border-strong); color: var(--text-secondary); }
+.input-config-row .img-btn .img-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.input-config-row .img-btn .img-btn-icon .rl-icon {
+  width: 14px;
+  height: 14px;
+}
+.input-config-row .img-btn .img-btn-label {
+  line-height: 1;
 }
 .voice-btn.is-recording {
   border-color: var(--error);

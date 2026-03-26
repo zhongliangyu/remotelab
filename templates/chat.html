@@ -120,11 +120,14 @@
         <div class="img-preview-strip" id="imgPreviewStrip"></div>
         <div class="input-config-row">
           <div class="input-config-group left">
+            <button class="img-btn" id="imgBtn" disabled title="Upload files" aria-label="Upload files" data-i18n-title="action.attachFiles" data-i18n-aria-label="action.attachFiles">
+              <span class="img-btn-icon" data-icon="attach" aria-hidden="true"></span>
+              <span class="img-btn-label" data-i18n="action.upload">Upload</span>
+            </button>
             <select class="tool-select" id="inlineToolSelect" disabled></select>
             <select class="model-select" id="inlineModelSelect" disabled></select>
             <button class="thinking-toggle" id="thinkingToggle" disabled data-i18n="tooling.thinking">Thinking</button>
             <select class="effort-select" id="effortSelect" disabled style="display:none"></select>
-            <button class="img-btn" id="imgBtn" disabled title="Attach files" aria-label="Attach files" data-i18n-title="action.attachFiles" data-i18n-aria-label="action.attachFiles" data-icon="attach">&#128247;</button>
           </div>
           <div class="input-config-group right">
             <span id="contextTokens" style="display:none"></span>

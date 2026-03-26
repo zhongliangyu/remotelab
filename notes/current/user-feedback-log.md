@@ -21,6 +21,15 @@ Directional synthesis: `notes/directional/product-vision.md`
 
 ## Current carried-forward signals
 
+### 2026-03-26 — attachment entry should use clear upload wording, not icon-only affordance
+
+- Source: direct product feedback during chat-composer review
+- User slice: mobile-first owner using the default chat input without prior RemoteLab habits
+- Observed friction or ask: an icon-only attachment control is easy to miss or misread; users may not infer that it is the file upload entry point
+- Signal: attachment entry should be placed early in the composer control row and use explicit upload wording instead of relying on icon recognition alone
+- Product implication: mainstream intake flows should prefer clear labeled actions over compact icon-only affordances for important first-step actions like uploading examples or source files
+- Promote to: composer UX defaults, future intake/onboarding review
+
 ### 2026-03-26 — abstract welcome needs concrete showcase examples
 
 - Source: direct product discussion after reviewing fresh-instance onboarding
