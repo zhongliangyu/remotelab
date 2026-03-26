@@ -174,7 +174,20 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   const list = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(list.status, 200, 'owner session list should load');
   assert.equal(list.json?.archivedCount, archivedCount, 'archived count should be preserved');
-  assert.equal((list.json?.sessions || []).length, 1, 'one active owner session should be available');
+  assert.equal((list.json?.sessions || []).length, 4, 'starter owner session set should include welcome plus three showcases');
+
+  const sessionNames = (list.json?.sessions || []).map((session) => session.name);
+  assert.deepEqual(sessionNames, [
+    'Welcome',
+    '[示例] 每天早上把 AI 行业新闻整理后发到我邮箱',
+    '[示例] 把这份 Excel 清洗后回给我',
+    '[示例] 收到报销邮件后自动提取附件并汇总',
+  ], 'starter sessions should appear in the intended sidebar order');
+
+  for (const [index, session] of (list.json?.sessions || []).entries()) {
+    assert.equal(session.pinned, true, 'starter sessions should be pinned for discoverability');
+    assert.equal(session.sidebarOrder, index + 1, 'starter sessions should keep a stable sidebar order');
+  }
 
   const welcomeSession = list.json?.sessions?.[0];
   assert.ok(welcomeSession?.id, 'welcome session should have an id');
@@ -190,11 +203,22 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.ok(welcomeEvent, 'welcome session should include an assistant onboarding message');
   const welcomeContent = await resolveEventContent(port, welcomeSession.id, welcomeEvent, { Cookie: ownerCookie });
   assert.match(welcomeContent, /我是 Rowan|先接手、再梳理、再推进执行/u, 'welcome copy should come from the built-in Welcome app');
+  assert.match(welcomeContent, /左侧我已经先放了几个示例会话/u, 'welcome copy should point owners to the seeded showcase sessions');
+
+  const showcaseSession = list.json?.sessions?.[1];
+  const showcaseEvents = await request(port, 'GET', `/api/sessions/${showcaseSession.id}/events`, null, { Cookie: ownerCookie });
+  assert.equal(showcaseEvents.status, 200, 'showcase session events should load');
+  const showcaseMessages = (showcaseEvents.json?.events || []).filter((event) => event.type === 'message');
+  assert.ok(showcaseMessages.some((event) => event.role === 'user'), 'showcase session should include a sample user ask');
+  assert.ok(showcaseMessages.some((event) => event.role === 'assistant'), 'showcase session should include a sample assistant reply');
+  const showcaseLastMessage = showcaseMessages[showcaseMessages.length - 1];
+  const showcaseContent = await resolveEventContent(port, showcaseSession.id, showcaseLastMessage, { Cookie: ownerCookie });
+  assert.match(showcaseContent, /已发送到你邮箱的简报|每天自动执行的发送流程/u, 'showcase session should end with a concrete deliverable');
 
   const secondList = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(secondList.status, 200, 'owner should be able to reload the session list');
-  assert.equal((secondList.json?.sessions || []).length, 1, 'reloading should not create duplicate welcome sessions');
-  assert.equal(secondList.json?.sessions?.[0]?.id, welcomeSession.id, 'welcome bootstrap should be idempotent');
+  assert.equal((secondList.json?.sessions || []).length, 4, 'reloading should not create duplicate starter sessions');
+  assert.equal(secondList.json?.sessions?.[0]?.id, welcomeSession.id, 'starter bootstrap should be idempotent for welcome');
 }
 
 async function runScenario(options) {

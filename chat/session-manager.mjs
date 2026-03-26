@@ -2613,10 +2613,15 @@ export async function listSessions({
     .filter((meta) => includeArchived || !meta.archived)
     .filter((meta) => !normalizedAppId || resolveEffectiveAppId(meta.appId) === normalizedAppId)
     .filter((meta) => !normalizedSourceId || resolveSessionSourceId(meta) === normalizedSourceId)
-    .sort((a, b) => (
-      getSessionPinSortRank(b) - getSessionPinSortRank(a)
-      || getSessionSortTime(b) - getSessionSortTime(a)
-    ));
+    .sort((a, b) => {
+      const sidebarOrderA = normalizeSessionSidebarOrder(a?.sidebarOrder);
+      const sidebarOrderB = normalizeSessionSidebarOrder(b?.sidebarOrder);
+      if (sidebarOrderA && sidebarOrderB && sidebarOrderA !== sidebarOrderB) {
+        return sidebarOrderA - sidebarOrderB;
+      }
+      return getSessionPinSortRank(b) - getSessionPinSortRank(a)
+        || getSessionSortTime(b) - getSessionSortTime(a);
+    });
   return Promise.all(filtered.map((meta) => enrichSessionMetaForClient(meta, {
     includeQueuedMessages,
   })));

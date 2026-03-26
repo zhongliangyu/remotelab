@@ -71,6 +71,7 @@ import {
   isBuiltinAppId,
   WELCOME_APP_ID,
 } from './apps.mjs';
+import { ensureOwnerBootstrapSessions } from './bootstrap-sessions.mjs';
 import {
   createUser,
   deleteUser,
@@ -136,11 +137,10 @@ const VISITOR_BROWSER_COOKIE_NAME = 'visitor_browser_id';
 const VISITOR_BROWSER_COOKIE_MAX_AGE_MS = 5 * 365 * 24 * 60 * 60 * 1000;
 const VISITOR_BROWSER_COOKIE_MAX_AGE_SECONDS = Math.max(1, Math.floor(VISITOR_BROWSER_COOKIE_MAX_AGE_MS / 1000));
 const VISITOR_BROWSER_COOKIE_SAME_SITE = 'Lax';
-const OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:welcome';
 let cachedPageBuildInfo = null;
 const frontendBuildWatchers = [];
 let frontendBuildInvalidationTimer = null;
-let ownerWelcomeSessionBootstrapPromise = null;
+let ownerBootstrapSessionsPromise = null;
 
 async function listSessionsForClient(options = {}) {
   const sessions = await listSessions(options);
@@ -667,36 +667,17 @@ async function createOwnerTemplatedSession({
   return session;
 }
 
-async function ensureOwnerWelcomeSession() {
-  if (ownerWelcomeSessionBootstrapPromise) {
-    return ownerWelcomeSessionBootstrapPromise;
+async function ensureOwnerStarterSessions() {
+  if (ownerBootstrapSessionsPromise) {
+    return ownerBootstrapSessionsPromise;
   }
 
-  ownerWelcomeSessionBootstrapPromise = (async () => {
-    const ownerSessions = (await listSessions({
-      includeVisitor: true,
-      includeArchived: true,
-    })).filter((session) => !session?.visitorId);
-
-    const activeOwnerSession = ownerSessions.find((session) => session?.archived !== true);
-    if (activeOwnerSession) return activeOwnerSession;
-
-    const welcomeApp = await getApp(WELCOME_APP_ID);
-    if (!welcomeApp || !isTemplateAppScopeId(welcomeApp.id)) return null;
-
-    return createOwnerTemplatedSession({
-      folder: '~',
-      tool: welcomeApp.tool || 'codex',
-      name: welcomeApp.name || 'Welcome',
-      app: welcomeApp,
-      externalTriggerId: OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID,
-    });
-  })();
+  ownerBootstrapSessionsPromise = ensureOwnerBootstrapSessions();
 
   try {
-    return await ownerWelcomeSessionBootstrapPromise;
+    return await ownerBootstrapSessionsPromise;
   } finally {
-    ownerWelcomeSessionBootstrapPromise = null;
+    ownerBootstrapSessionsPromise = null;
   }
 }
 
@@ -1542,7 +1523,7 @@ export async function handleRequest(req, res) {
 
   if (sessionGetRoute?.kind === 'list' || sessionGetRoute?.kind === 'archived-list') {
     if (authSession?.role === 'owner') {
-      await ensureOwnerWelcomeSession();
+      await ensureOwnerStarterSessions();
     }
     const includeVisitor = authSession?.role === 'owner'
       && ['1', 'true', 'yes'].includes(String(parsedUrl.query.includeVisitor || '').toLowerCase());
