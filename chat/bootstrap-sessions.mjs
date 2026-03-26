@@ -8,7 +8,7 @@ import { loadMailboxRuntimeRegistry } from '../lib/mailbox-runtime-registry.mjs'
 
 import { BASIC_CHAT_APP_ID, WELCOME_APP_ID, getApp } from './apps.mjs';
 import { publishLocalFileAssetFromPath } from './file-assets.mjs';
-import { appendEvents } from './history.mjs';
+import { appendEvents, readEventsAfter } from './history.mjs';
 import { messageEvent } from './normalizer.mjs';
 import {
   applyAppTemplateToSession,
@@ -28,6 +28,9 @@ const RAW_SPREADSHEET_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.raw.x
 const CLEANED_SPREADSHEET_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.cleaned.xlsx');
 const CLEANUP_NOTES_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.notes.md');
 const DIGEST_SHOWCASE_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'ai-coding-agent-digest.sample.md');
+const OWNER_BOOTSTRAP_FILE_SHOWCASE_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:file_cleanup';
+const OWNER_BOOTSTRAP_DIGEST_SHOWCASE_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:digest_email_delivery';
+const OWNER_BOOTSTRAP_INSTANCE_EMAIL_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:instance_email';
 
 function safeReadJson(filePath, fallbackValue = null) {
   try {
@@ -82,6 +85,41 @@ function buildInboundEmailSetupHint(mailboxAddress) {
   return '补充一个和邮件相关的提示：如果你想测试“发邮件到这个实例会自动开新会话”这条能力，先把你会用来发送的邮箱告诉我，我会先把它设成允许发件人；不然安全机制会先把邮件拦掉。';
 }
 
+function buildEmailShowcaseIntro(mailboxAddress) {
+  if (mailboxAddress) {
+    return [
+      '这个示例基于我刚验证过的真实链路。',
+      `这个实例当前的收件地址是 \`${mailboxAddress}\`。你直接给它发邮件，左侧会自动多出一个新会话。`,
+      '正式测试前，先把你会用来发送的邮箱告诉我，我会先把它设成允许发件人；不然安全机制会先把邮件拦掉。',
+      '下面这条用户消息，就是邮件进入会话后实际会出现的格式。',
+    ].join('\n\n');
+  }
+
+  return [
+    '这个示例基于我刚验证过的真实链路。',
+    '实例启用邮箱接入后，你直接给它发邮件，左侧会自动多出一个新会话。',
+    '正式测试前，先把你会用来发送的邮箱告诉我，我会先把它设成允许发件人；不然安全机制会先把邮件拦掉。',
+    '下面这条用户消息，就是邮件进入会话后实际会出现的格式。',
+  ].join('\n\n');
+}
+
+function buildEmailShowcaseUserMessage(mailboxAddress) {
+  return [
+    'Inbound email.',
+    '- From: jiujianian@gmail.com',
+    '- Subject: 真实能力验证邮件',
+    '- Date: (no date)',
+    '- Message-ID: (no message id)',
+    '',
+    'User message:',
+    '这是一次真实能力验证邮件。',
+    '',
+    mailboxAddress
+      ? `如果链路正常，发到 ${mailboxAddress} 的邮件会自动进到一个新会话里。`
+      : '如果链路正常，发到这个实例地址的邮件会自动进到一个新会话里。',
+  ].join('\n');
+}
+
 function buildDigestShowcaseIntro() {
   return [
     '这是一个已经实测跑通过的样例。',
@@ -108,7 +146,7 @@ function getOwnerBootstrapSessionDefinitions() {
     },
     {
       appId: BASIC_CHAT_APP_ID,
-      externalTriggerId: 'owner_bootstrap:showcase:file_cleanup',
+      externalTriggerId: OWNER_BOOTSTRAP_FILE_SHOWCASE_EXTERNAL_TRIGGER_ID,
       name: '[示例] 上传一份表格，我把清洗后的文件回给你',
       pinned: true,
       sidebarOrder: 2,
@@ -157,7 +195,7 @@ function getOwnerBootstrapSessionDefinitions() {
     },
     {
       appId: BASIC_CHAT_APP_ID,
-      externalTriggerId: 'owner_bootstrap:showcase:digest_email_delivery',
+      externalTriggerId: OWNER_BOOTSTRAP_DIGEST_SHOWCASE_EXTERNAL_TRIGGER_ID,
       name: '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
       pinned: true,
       sidebarOrder: 3,
@@ -187,14 +225,88 @@ function getOwnerBootstrapSessionDefinitions() {
         },
       ],
     },
+    {
+      appId: BASIC_CHAT_APP_ID,
+      externalTriggerId: OWNER_BOOTSTRAP_INSTANCE_EMAIL_EXTERNAL_TRIGGER_ID,
+      name: '[示例] 发一封邮件到这个实例，会自动开一个新会话',
+      pinned: true,
+      sidebarOrder: 4,
+      messages: [
+        {
+          role: 'assistant',
+          content: buildEmailShowcaseIntro(mailboxAddress),
+        },
+        {
+          role: 'user',
+          content: buildEmailShowcaseUserMessage(mailboxAddress),
+        },
+        {
+          role: 'assistant',
+          content: '这就是邮件进来后的实际起点。你自己试的时候，不用先进来手动新建聊天；邮件到达后我会先把它挂成单独会话，再继续处理。',
+        },
+      ],
+    },
   ];
 }
 
 const LEGACY_WELCOME_SHOWCASE_HINT = [
-  '另外，左侧已经给你放了 2 个真实跑通过的示例会话。',
+  '另外，左侧现在已经给你放了 3 个真实跑通过的示例会话：表格清洗回传、行业热点摘要发邮箱、以及发邮件进实例自动开新会话。',
   '你可以按兴趣点开看看，主要是参考：用户通常怎么开头、我会怎么交付，以及结果会长什么样。',
   '觉得哪个最像你的情况，就直接照着那个方式把你的版本发给我。',
 ].join('\n\n');
+
+function getStarterMessagesForDefinition(definition, app) {
+  return Array.isArray(definition.messages) && definition.messages.length > 0
+    ? definition.messages
+    : (app?.welcomeMessage ? [{ role: 'assistant', content: app.welcomeMessage }] : []);
+}
+
+async function applyBootstrapSessionPresentation(session, definition) {
+  let nextSession = session;
+  if (Number.isInteger(definition.sidebarOrder) && definition.sidebarOrder > 0) {
+    nextSession = await updateSessionGrouping(nextSession.id, { sidebarOrder: definition.sidebarOrder }) || nextSession;
+  }
+  if (definition.pinned === true) {
+    nextSession = await setSessionPinned(nextSession.id, true) || nextSession;
+  }
+  if (nextSession?.updatedAt) {
+    nextSession = await updateSessionLastReviewedAt(nextSession.id, nextSession.updatedAt) || nextSession;
+  }
+  return nextSession;
+}
+
+async function loadMessageContents(sessionId) {
+  const events = await readEventsAfter(sessionId, 0, { includeBodies: true });
+  return events
+    .filter((event) => event?.type === 'message' && typeof event?.content === 'string')
+    .map((event) => event.content.trim())
+    .filter(Boolean);
+}
+
+async function appendMissingBootstrapMessages(sessionId, messages = [], existingContents = null) {
+  const contents = Array.isArray(existingContents) ? existingContents : await loadMessageContents(sessionId);
+  const pendingMessages = messages.filter((message) => {
+    const content = typeof message?.content === 'string' ? message.content.trim() : '';
+    return content && !contents.includes(content);
+  });
+  if (pendingMessages.length === 0) return 0;
+  const pendingEvents = await buildMessageEvents(sessionId, pendingMessages);
+  if (pendingEvents.length === 0) return 0;
+  await appendEvents(sessionId, pendingEvents);
+  return pendingEvents.length;
+}
+
+async function backfillWelcomeGuideMessages(session, mailboxAddress) {
+  const existingContents = await loadMessageContents(session.id);
+  const followups = [];
+  if (!existingContents.some((content) => /3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content))) {
+    followups.push({ role: 'assistant', content: LEGACY_WELCOME_SHOWCASE_HINT });
+  }
+  if (!existingContents.some((content) => /允许发件人|安全机制会先把邮件拦掉/u.test(content))) {
+    followups.push({ role: 'assistant', content: buildInboundEmailSetupHint(mailboxAddress) });
+  }
+  await appendMissingBootstrapMessages(session.id, followups, existingContents);
+}
 
 async function publishMessageAttachments(sessionId, attachments = []) {
   const publishedAttachments = [];
@@ -249,9 +361,7 @@ async function createOwnerBootstrapSession(definition, { appendLegacyWelcomeHint
   session = await getSession(session.id) || session;
 
   if (Number(session?.messageCount || 0) === 0) {
-    const starterMessages = Array.isArray(definition.messages) && definition.messages.length > 0
-      ? definition.messages
-      : (app.welcomeMessage ? [{ role: 'assistant', content: app.welcomeMessage }] : []);
+    const starterMessages = getStarterMessagesForDefinition(definition, app);
     const extraMessages = Array.isArray(definition.extraMessages) ? definition.extraMessages : [];
     const starterEvents = await buildMessageEvents(session.id, [...starterMessages, ...extraMessages]);
     if (starterEvents.length > 0) {
@@ -269,17 +379,50 @@ async function createOwnerBootstrapSession(definition, { appendLegacyWelcomeHint
     }
   }
 
-  if (Number.isInteger(definition.sidebarOrder) && definition.sidebarOrder > 0) {
-    session = await updateSessionGrouping(session.id, { sidebarOrder: definition.sidebarOrder }) || session;
-  }
-  if (definition.pinned === true) {
-    session = await setSessionPinned(session.id, true) || session;
-  }
-  if (session?.updatedAt) {
-    session = await updateSessionLastReviewedAt(session.id, session.updatedAt) || session;
+  return applyBootstrapSessionPresentation(session, definition);
+}
+
+export async function backfillOwnerBootstrapSessions() {
+  const ownerBootstrapSessions = getOwnerBootstrapSessionDefinitions();
+  const mailboxAddress = resolveCurrentMailboxAddress();
+  const ownerSessions = (await listSessions({
+    includeVisitor: true,
+    includeArchived: true,
+  })).filter((session) => !session?.visitorId);
+  const activeOwnerSessions = ownerSessions.filter((session) => session?.archived !== true);
+  const sessionsByTrigger = new Map(
+    activeOwnerSessions
+      .filter((session) => typeof session?.externalTriggerId === 'string' && session.externalTriggerId.trim())
+      .map((session) => [session.externalTriggerId.trim(), session]),
+  );
+
+  const created = [];
+  const updated = [];
+  let welcomeSession = sessionsByTrigger.get(OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID) || null;
+
+  for (const definition of ownerBootstrapSessions) {
+    let session = sessionsByTrigger.get(definition.externalTriggerId) || null;
+    if (!session) {
+      session = await createOwnerBootstrapSession(definition);
+      if (!session) continue;
+      sessionsByTrigger.set(definition.externalTriggerId, session);
+      created.push(definition.name);
+    } else {
+      session = await applyBootstrapSessionPresentation(session, definition);
+      updated.push(definition.name);
+    }
+
+    if (definition.externalTriggerId === OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID) {
+      await backfillWelcomeGuideMessages(session, mailboxAddress);
+      welcomeSession = await getSession(session.id) || session;
+    }
   }
 
-  return session;
+  return {
+    welcomeSession,
+    created,
+    updated,
+  };
 }
 
 export async function ensureOwnerBootstrapSessions() {

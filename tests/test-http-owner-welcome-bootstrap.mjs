@@ -174,13 +174,14 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   const list = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(list.status, 200, 'owner session list should load');
   assert.equal(list.json?.archivedCount, archivedCount, 'archived count should be preserved');
-  assert.equal((list.json?.sessions || []).length, 3, 'starter owner session set should include welcome plus two verified showcases');
+  assert.equal((list.json?.sessions || []).length, 4, 'starter owner session set should include welcome plus three verified showcases');
 
   const sessionNames = (list.json?.sessions || []).map((session) => session.name);
   assert.deepEqual(sessionNames, [
     'Welcome',
     '[示例] 上传一份表格，我把清洗后的文件回给你',
     '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
+    '[示例] 发一封邮件到这个实例，会自动开一个新会话',
   ], 'starter sessions should appear in the intended sidebar order');
 
   for (const [index, session] of (list.json?.sessions || []).entries()) {
@@ -202,7 +203,7 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.ok(welcomeEvent, 'welcome session should include an assistant onboarding message');
   const welcomeContent = await resolveEventContent(port, welcomeSession.id, welcomeEvent, { Cookie: ownerCookie });
   assert.match(welcomeContent, /我是 Rowan|先接手、再梳理、再推进执行/u, 'welcome copy should come from the built-in Welcome app');
-  assert.match(welcomeContent, /左侧我已经先放了 2 个真实跑通过的示例会话/u, 'welcome copy should point owners to the verified showcase sessions');
+  assert.match(welcomeContent, /左侧我已经先放了 3 个真实跑通过的示例会话/u, 'welcome copy should point owners to the verified showcase sessions');
   const welcomeAssistantMessages = await Promise.all(
     (events.json?.events || [])
       .filter((event) => event.type === 'message' && event.role === 'assistant')
@@ -211,6 +212,10 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   assert.ok(
     welcomeAssistantMessages.some((content) => /发件邮箱|允许发件人|安全机制/u.test(content)),
     'welcome bootstrap should warn that inbound email tests need the sender address allowlisted first',
+  );
+  assert.ok(
+    welcomeAssistantMessages.some((content) => /3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content)),
+    'welcome bootstrap should mention the three pinned examples when backfilled',
   );
 
   const fileShowcaseSession = list.json?.sessions?.[1];
@@ -254,9 +259,21 @@ async function assertWelcomeBootstrapped(port, { archivedCount = 0 } = {}) {
   const digestBody = await digestDownloadRes.text();
   assert.match(digestBody, /今日最重要结论|Claude Code|Codex/u, 'digest showcase attachment should contain a readable summary body');
 
+  const emailShowcaseSession = list.json?.sessions?.[3];
+  const emailShowcaseEvents = await request(port, 'GET', `/api/sessions/${emailShowcaseSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
+  assert.equal(emailShowcaseEvents.status, 200, 'email showcase session events should load');
+  const emailShowcaseMessages = (emailShowcaseEvents.json?.events || []).filter((event) => event.type === 'message');
+  assert.equal(emailShowcaseMessages.length, 3, 'email showcase should keep the expected three-message transcript');
+  const emailIntroContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[0], { Cookie: ownerCookie });
+  const emailUserContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[1], { Cookie: ownerCookie });
+  const emailAssistantContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[2], { Cookie: ownerCookie });
+  assert.match(emailIntroContent, /收件地址|允许发件人|自动多出一个新会话/u, 'email showcase should explain the inbound-email entry flow');
+  assert.match(emailUserContent, /Inbound email\.|真实能力验证邮件|自动进到一个新会话/u, 'email showcase should demonstrate the inbound email transcript shape');
+  assert.match(emailAssistantContent, /邮件进来后的实际起点|手动新建聊天/u, 'email showcase should end with the actual session handoff explanation');
+
   const secondList = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
   assert.equal(secondList.status, 200, 'owner should be able to reload the session list');
-  assert.equal((secondList.json?.sessions || []).length, 3, 'reloading should not create duplicate starter sessions');
+  assert.equal((secondList.json?.sessions || []).length, 4, 'reloading should not create duplicate starter sessions');
   assert.equal(secondList.json?.sessions?.[0]?.id, welcomeSession.id, 'starter bootstrap should be idempotent for welcome');
 }
 
