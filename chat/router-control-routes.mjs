@@ -51,6 +51,16 @@ import {
   updateSessionRuntimePreferences,
   updateSessionWorkflowClassification,
 } from './session-manager.mjs';
+import {
+  getWorkspaces,
+  getWorkspace,
+  createWorkspace,
+  updateWorkspace,
+  deleteWorkspace,
+  getCurrentWorkspaceId,
+  setCurrentWorkspaceId,
+  getWorkspaceSummary,
+} from './workspace-manager.mjs';
 
 const uploadedMediaMimeTypes = {
   gif: 'image/gif',
@@ -800,6 +810,106 @@ export async function handleControlRoutes({
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message || 'Invalid request body' }));
+    }
+    return true;
+  }
+
+  // ---- Workspace API ----
+  if (pathname === '/api/workspaces' && req.method === 'GET') {
+    const workspaces = await getWorkspaces();
+    writeJsonCached(req, res, {
+      workspaces: workspaces.map(getWorkspaceSummary),
+      currentWorkspaceId: getCurrentWorkspaceId(),
+    });
+    return true;
+  }
+
+  if (pathname === '/api/workspaces' && req.method === 'POST') {
+    let body;
+    try { body = await readBody(req, 4096); } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad request' }));
+      return true;
+    }
+    try {
+      const data = JSON.parse(body);
+      const workspace = await createWorkspace(data);
+      writeJson(res, 201, { workspace: getWorkspaceSummary(workspace) });
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+    return true;
+  }
+
+  if (pathname.startsWith('/api/workspaces/') && req.method === 'GET') {
+    const workspaceId = decodeURIComponent(pathname.slice('/api/workspaces/'.length));
+    const workspace = await getWorkspace(workspaceId);
+    if (!workspace) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Workspace not found' }));
+      return true;
+    }
+    writeJsonCached(req, res, { workspace: getWorkspaceSummary(workspace) });
+    return true;
+  }
+
+  if (pathname.startsWith('/api/workspaces/') && req.method === 'PATCH') {
+    const workspaceId = decodeURIComponent(pathname.slice('/api/workspaces/'.length));
+    let body;
+    try { body = await readBody(req, 4096); } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad request' }));
+      return true;
+    }
+    try {
+      const updates = JSON.parse(body);
+      const workspace = await updateWorkspace(workspaceId, updates);
+      writeJson(res, 200, { workspace: getWorkspaceSummary(workspace) });
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+    return true;
+  }
+
+  if (pathname.startsWith('/api/workspaces/') && req.method === 'DELETE') {
+    const workspaceId = decodeURIComponent(pathname.slice('/api/workspaces/'.length));
+    try {
+      await deleteWorkspace(workspaceId);
+      writeJson(res, 200, { ok: true });
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+    return true;
+  }
+
+  if (pathname === '/api/workspaces/current' && req.method === 'GET') {
+    writeJsonCached(req, res, { workspaceId: getCurrentWorkspaceId() });
+    return true;
+  }
+
+  if (pathname === '/api/workspaces/current' && req.method === 'PUT') {
+    let body;
+    try { body = await readBody(req, 4096); } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad request' }));
+      return true;
+    }
+    try {
+      const { workspaceId } = JSON.parse(body);
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Workspace not found' }));
+        return true;
+      }
+      setCurrentWorkspaceId(workspaceId);
+      writeJson(res, 200, { workspaceId });
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
     }
     return true;
   }

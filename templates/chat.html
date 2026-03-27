@@ -44,6 +44,10 @@
         <h2>RemoteLab</h2>
         <button class="header-btn" id="closeSidebar" title="Close sidebar" aria-label="Close sidebar" data-i18n-title="action.close" data-i18n-aria-label="action.close" data-icon="close">&#x2715;</button>
       </div>
+      <div class="workspace-switcher" id="workspaceSwitcher">
+        <select class="workspace-select" id="workspaceSelect" aria-label="Select workspace" data-i18n-aria-label="workspace.selectAriaLabel"></select>
+        <button class="workspace-add-btn" id="addWorkspaceBtn" title="Add workspace" aria-label="Add workspace" data-i18n-title="workspace.add" data-i18n-aria-label="workspace.add">+</button>
+      </div>
       <div class="sidebar-tabs">
         <button class="sidebar-tab active" id="tabSessions" data-i18n="nav.sessions">Sessions</button>
         <button class="sidebar-tab" id="tabSettings" data-i18n="nav.settings">Settings</button>
@@ -267,6 +271,7 @@
 <script src="/chat/session-list-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/settings-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/sidebar-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
+<script src="/chat/workspace-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/compose.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/gestures.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="/chat/init.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>

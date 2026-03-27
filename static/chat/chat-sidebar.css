@@ -17,6 +17,29 @@
   min-height: 48px;
 }
 .sidebar-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+
+/* Workspace switcher */
+.workspace-switcher {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.workspace-select {
+  flex: 1; padding: 6px 8px;
+  font-size: 13px; font-family: inherit;
+  background: var(--bg-secondary); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer;
+}
+.workspace-select:hover { border-color: var(--border-strong); }
+.workspace-add-btn {
+  width: 32px; height: 32px;
+  font-size: 16px; font-weight: 600;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.workspace-add-btn:hover { background: var(--bg-tertiary); color: var(--text); }
+
 .sidebar-list { flex: 1; overflow-y: auto; padding: 8px 8px; }
 .header-btn,
 .sidebar-tab,

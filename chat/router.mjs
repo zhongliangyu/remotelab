@@ -1055,6 +1055,9 @@ function isOwnerOnlyRoute(pathname, method) {
   if (pathname === '/api/browse' && method === 'GET') return true;
   if (pathname === '/api/push/vapid-public-key' && method === 'GET') return true;
   if (pathname === '/api/push/subscribe' && method === 'POST') return true;
+  if (pathname === '/api/workspaces' && ['GET', 'POST'].includes(method)) return true;
+  if (pathname.startsWith('/api/workspaces/') && ['GET', 'PATCH', 'DELETE'].includes(method)) return true;
+  if (pathname === '/api/workspaces/current' && ['GET', 'PUT'].includes(method)) return true;
   return false;
 }
 

@@ -293,6 +293,9 @@ const newSessionFolderInput = document.getElementById("newSessionFolderInput");
 const newSessionFolderSuggestions = document.getElementById("newSessionFolderSuggestions");
 const newSessionToolSelect = document.getElementById("newSessionToolSelect");
 const newSessionNameInput = document.getElementById("newSessionNameInput");
+const workspaceSwitcher = document.getElementById("workspaceSwitcher");
+const workspaceSelect = document.getElementById("workspaceSelect");
+const addWorkspaceBtn = document.getElementById("addWorkspaceBtn");
 
 refreshFrontendBtn?.addEventListener("click", () => {
   void reloadForFreshBuild(newerBuildInfo);

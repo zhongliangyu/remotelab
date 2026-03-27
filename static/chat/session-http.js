@@ -222,19 +222,32 @@ let sessionListOrganizerLabelResetTimer = null;
 
 const SESSION_LIST_ORGANIZER_SYSTEM_PROMPT = [
   "You are RemoteLab's hidden session-list organizer.",
-  "Your job is to improve the owner's non-archived session sidebar structure using the provided metadata snapshot.",
+  "Your job is to organize the owner's non-archived session sidebar by project folder.",
   "Do not rename sessions, archive or unarchive them, change pin state, edit prompts, or ask the user follow-up questions.",
   "Only update existing sessions by calling the owner-authenticated RemoteLab API from this machine.",
-  "Use `remotelab api GET /api/sessions` if you need to double-check current state.",
   "Use `remotelab api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.",
   "Only writable API fields for this task are `group` and `sidebarOrder`.",
   "Never send read-only snapshot keys such as `title`, `brief`, `existingGroup`, `existingSidebarOrder`, `currentGroup`, or `currentSidebarOrder` in PATCH bodies.",
   "Example PATCH body: {\"group\":\"RemoteLab\",\"sidebarOrder\":3}",
   "If `remotelab` is unavailable in PATH, use `node \"$REMOTELAB_PROJECT_ROOT/cli.js\" api ...` instead.",
+  "",
+  "## Grouping Rule (MUST FOLLOW)",
+  "Set the `group` field to the last directory name of each session's `folder` path:",
+  "- Extract the final path segment from the `folder` field as the group name.",
+  "- Examples:",
+  "  - `/home/user/projects/remotelab` → group: `remotelab`",
+  "  - `/Users/dev/work/my-app` → group: `my-app`",
+  "  - `~/projects/website` → group: `website`",
+  "  - `~` or `/home/user` → group: `~`",
+  "- Do NOT invent group names; always derive from the folder path.",
+  "- Do NOT merge different projects into one group.",
+  "",
+  "## Ordering Rule",
   "`sidebarOrder` must be a positive integer; smaller numbers sort first.",
   "Assign unique contiguous `sidebarOrder` values across the current non-archived sessions you organize.",
-  "Prefer a small number of clear, stable groups; avoid one giant catch-all group when the list is dense.",
-  "Return only a brief plain-text summary of the grouping strategy you applied.",
+  "Within each group, order sessions by `messageCount` descending (most active first), or by `id` if counts are equal.",
+  "",
+  "Return only a brief plain-text summary of the folders you found and grouped.",
 ].join("\n");
 
 function sleep(ms) {
@@ -310,8 +323,9 @@ function buildSessionListOrganizerTask(sessions) {
     sessions: Array.isArray(sessions) ? sessions : [],
   };
   return [
-    "Organize the current non-archived RemoteLab session list using the provided metadata snapshot.",
-    "Choose clearer groups and a better sidebar ordering based on the current session density.",
+    "Organize the current non-archived RemoteLab session list by project folder.",
+    "Set each session's `group` to the last directory name of its `folder` path.",
+    "Order sessions within each group by message count (most active first).",
     "Apply changes by calling the RemoteLab API from this machine; do not merely suggest them.",
     "Snapshot fields like `title`, `brief`, `existingGroup`, and `existingSidebarOrder` are read-only context.",
     "When patching a session, send only `group` and `sidebarOrder` in the API body.",
