@@ -1439,8 +1439,6 @@ async function createOrReuseSession(runtime, summary, runtimeSelection) {
     folder: runtime.config.sessionFolder,
     tool: runtimeSelection.tool,
     name: buildSessionName(summary),
-    appId: REMOTELAB_SESSION_APP_ID,
-    appName: sourceName,
     sourceId: 'feishu',
     sourceName,
     group: 'Feishu',

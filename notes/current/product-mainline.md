@@ -7,7 +7,7 @@ Directional companion: `notes/directional/product-vision.md`
 Execution companions:
 
 - `notes/current/session-main-flow-next-push.md`
-- `notes/current/capability-first-shipping-plan.md`
+- `notes/current/session-first-workflow-surfaces.md`
 - `notes/current/session-first-product-contraction.md`
 
 Evidence log: `notes/current/user-feedback-log.md`
@@ -50,7 +50,7 @@ Evidence log: `notes/current/user-feedback-log.md`
 - `notes/directional/product-vision.md` — durable product judgments and target-user framing
 - `README.md` / `README.zh.md` — user-facing product promise
 - `notes/current/session-main-flow-next-push.md` — near-term capability push
-- `notes/current/capability-first-shipping-plan.md` — implementation framing for that push
+- `notes/current/session-first-workflow-surfaces.md` — workflow-organization baseline for session-first surfaces
 
 ## What is worth logging
 

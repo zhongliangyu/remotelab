@@ -626,6 +626,9 @@ function renderHiddenBlockEventsInto(container, events) {
       case "context_barrier":
         renderContextBarrierInto(container, event);
         break;
+      case "context_operation":
+        renderContextOperationInto(container, event);
+        break;
       case "usage":
         renderUsageInto(container, event);
         break;
@@ -844,6 +847,64 @@ function renderContextBarrier(evt) {
     finalizeThinkingBlock();
   }
   renderContextBarrierInto(messagesInner, evt);
+}
+
+function humanizeContextOperationValue(value) {
+  return String(value || "").trim().replace(/_/g, " ");
+}
+
+function renderContextOperationInto(container, evt) {
+  if (!container) return null;
+  const card = document.createElement("div");
+  card.className = "context-operation";
+  if (evt?.phase) card.dataset.phase = evt.phase;
+  if (evt?.operation) card.dataset.operation = evt.operation;
+
+  const title = document.createElement("div");
+  title.className = "context-operation-title";
+  title.textContent = evt?.title || evt?.content || t("context.barrier");
+  card.appendChild(title);
+
+  const summaryText = typeof evt?.summary === "string" ? evt.summary.trim() : "";
+  if (summaryText) {
+    const summary = document.createElement("div");
+    summary.className = "context-operation-summary";
+    summary.textContent = summaryText;
+    card.appendChild(summary);
+  }
+
+  const metaParts = [];
+  const phaseText = humanizeContextOperationValue(evt?.phase);
+  if (phaseText) metaParts.push(phaseText);
+  const triggerText = humanizeContextOperationValue(evt?.trigger);
+  if (triggerText) metaParts.push(triggerText);
+  if (Number.isInteger(evt?.compactedThroughSeq) && evt.compactedThroughSeq > 0) {
+    metaParts.push(`through #${evt.compactedThroughSeq}`);
+  }
+  if (metaParts.length > 0) {
+    const meta = document.createElement("div");
+    meta.className = "context-operation-meta";
+    meta.textContent = metaParts.join(" · ");
+    card.appendChild(meta);
+  }
+
+  const reasonText = typeof evt?.reason === "string" ? evt.reason.trim() : "";
+  if (reasonText) {
+    const reason = document.createElement("div");
+    reason.className = "context-operation-reason";
+    reason.textContent = reasonText;
+    card.appendChild(reason);
+  }
+
+  container.appendChild(card);
+  return card;
+}
+
+function renderContextOperation(evt) {
+  if (inThinkingBlock) {
+    finalizeThinkingBlock();
+  }
+  renderContextOperationInto(messagesInner, evt);
 }
 
 function formatCompactTokens(n) {

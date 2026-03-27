@@ -2,7 +2,7 @@
 
 Status: archived board-first execution hypothesis from 2026-03-17
 
-Superseded by `notes/current/session-main-flow-next-push.md` and `notes/current/capability-first-shipping-plan.md` as of 2026-03-18.
+Superseded by `notes/current/session-main-flow-next-push.md` and the archived follow-on note `notes/archive/capability-first-shipping-plan.md` as of 2026-03-18; current product framing now lives in `notes/current/product-mainline.md`.
 
 ## One-line goal
 

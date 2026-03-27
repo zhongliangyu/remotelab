@@ -828,8 +828,6 @@ try {
     },
   );
 
-  assert.equal(createdPayload?.appId, 'feishu');
-  assert.equal(createdPayload?.appName, 'Feishu');
   assert.equal(createdPayload?.sourceId, 'feishu');
   assert.equal(createdPayload?.sourceName, 'Feishu');
   assert.equal(createdPayload?.tool, 'claude');

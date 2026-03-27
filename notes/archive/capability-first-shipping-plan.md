@@ -1,12 +1,20 @@
 # Capability-First Shipping Plan
 
-Status: implementation note from 2026-03-18; partially superseded as a product headline by the 2026-03-24 reset in `notes/directional/product-vision.md`
+Status: archived implementation note from 2026-03-18; kept only as historical context for the earlier session-first/main-flow reset.
 
-Use this note for the session-first/main-flow implementation details, but treat multi-session fan-out and cross-session freshness as enabling capabilities rather than the primary top-level product promise.
+Live successors:
 
-Concrete execution companion: `notes/current/session-main-flow-next-push.md`
+- `notes/current/product-mainline.md`
+- `notes/current/session-main-flow-next-push.md`
+- `notes/current/session-first-workflow-surfaces.md`
 
-Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
+## 2026-03-27 pruning update
+
+- Keep this note as background for the session-first reset after `Board` removal, not as the live mainline backlog.
+- Treat the manager/delegate flow, one-turn multi-session fan-out, and bounded cross-session context carry as shipped enough for now.
+- Do not currently prioritize AI-owned session presentation, richer session metadata, grouping/task-like workflow surfaces, or packaging/framework work for reusable automations.
+- Mobile capture + desktop execution handoff counts as landed.
+- Use `AGENTS.md` → `Current Priorities` as the live backlog and reopen slices from this note only if regressions or new product evidence justify them.
 
 ## Decision
 
@@ -39,19 +47,21 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 - If a board-like view ever returns later, it must be re-earned as a derived surface rather than inherited from the current implementation.
 - Judge the next push by whether the owner can operate RemoteLab cleanly through session-first surfaces after the current board is gone.
 
-### 2. Multi-session fan-out remains important
+### 2. Historical rationale for multi-session fan-out
 
 - The product win is not only "forking"; it is one user turn intentionally spawning several bounded worker sessions.
 - Keep the source/dispatch session lightweight and orchestration-focused, not a heavy parent container.
 - Treat spawned sessions as normal independent sessions with concise aggregation back into the source session when useful.
 
-### 3. Cross-session context freshness is now core
+### 3. Historical rationale for cross-session context freshness
 
 - Multiple sessions only feel natural if recent relevant updates can follow the user across sessions.
 - Optimize for the "I already told you elsewhere" case without forcing the user to replay prior chats.
 - Use bounded summaries, refs, recent-decision packets, or explicit handoff blocks instead of eager shared-transcript loading.
 
-## Immediate gaps to close
+## Historical gaps from the 2026-03-18 push
+
+These were the active questions for that push. Do not treat them as the live backlog now that `Board` is removed and the fan-out/context-carry baseline is considered good enough.
 
 ### Main-flow gaps
 
@@ -72,7 +82,7 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 - Confirm imported context stays bounded and observable instead of becoming a hidden giant shared memory layer.
 - Reuse the shipped compaction, summary/refs, and prepared fork-context paths where possible instead of inventing a new memory stack from scratch.
 
-## Suggested near-term execution order
+## Historical execution order for that push
 
 1. Clarify the owner main flow after `Board` removal.
 2. Define and prototype the cross-session context-freshness contract.
@@ -80,14 +90,14 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 4. Add context-source observability and tune the bounded continuation paths that the new workflow depends on.
 5. Re-evaluate later whether any board-like derived surface deserves to return after the main flow feels right.
 
-## Shipping candidate for the next push
+## Historical shipping candidate
 
 - The owner can operate RemoteLab cleanly after the shipped `Board` surface is removed.
 - A manager/control session can fan one user turn out into several focused independent sessions and report back with a light summary when useful.
 - A new or sibling session can receive recent relevant context from adjacent work without the user manually replaying everything.
 - Context carry remains bounded and observable so continued or spawned sessions are not silently replaying too much history.
 
-## The next four slices
+## Historical slice breakdown
 
 ### Slice 1 — session-first main flow without board lock-in
 
@@ -95,13 +105,13 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 - Make the next push evaluable with `Board` already removed from the active owner flow.
 - Keep everyday operation possible through the session list, active session surface, or a lightweight dispatcher-like entry rather than a board requirement.
 
-### Slice 2 — cross-session context freshness contract
+### Slice 2 — historical cross-session context freshness contract
 
 - Define a minimal reusable unit for recent-context carry: summary, refs, recent decisions, or a bounded continuation packet.
 - Keep imports conservative and explainable; prefer explicit or high-confidence linkage before automatic carry.
 - Treat source and freshness metadata as part of the operator trust contract.
 
-### Slice 3 — one-turn multi-session fan-out
+### Slice 3 — historical one-turn multi-session fan-out
 
 - Promote the current single-session delegation primitive into a deliberate multi-session orchestration pattern.
 - Prefer lightweight source-session summaries and normal session-level navigation over one heavy parent-side handoff object.
@@ -114,11 +124,11 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 - Add lightweight observability for which continuation path a run actually used and what recent context it inherited.
 - Keep this scoped to enabling the session-first + fan-out workflow; do not turn it into a speculative memory architecture rewrite.
 
-## Push gate
+## Historical push gate
 
 - The main owner flow feels coherent after `Board` is removed from the active owner experience.
-- Cross-session context freshness is demoable in a bounded, inspectable way.
-- One-turn multi-session fan-out is demoable end to end with independent spawned sessions and a light aggregation path.
+- Historically, cross-session context freshness needed to be demoable in a bounded, inspectable way.
+- Historically, one-turn multi-session fan-out needed to be demoable end to end with independent spawned sessions and a light aggregation path.
 - The known recursive fan-out regression is fixed.
 - The known fork-context regression is either fixed or explicitly judged non-blocking for this push.
 - We can tell, at least in debug/operator surfaces, whether continuation came from history, summary handoff, prepared context, or a cross-session import packet.
@@ -135,5 +145,5 @@ Historical board-first hypothesis: `notes/archive/board-fanout-next-push.md`
 - Single delegate/session-spawn flow is already validated by `tests/test-http-runtime-phase1.mjs`.
 - Session-state workflow classification is validated by `tests/test-chat-session-state-model.mjs`.
 - Auto-compaction and summary/refs cache contracts are validated by `tests/test-auto-compaction.mjs` and `tests/test-http-session-summary-refs.mjs`.
-- Recursive fan-out and fork-context validation still need focused follow-up because current dedicated tests expose regressions before the full happy path is green.
-- A dedicated validation pass for cross-session context freshness still needs to be defined once the contract settles.
+- Multi-session fan-out and bounded cross-session context carry are treated as landed enough for current product planning; reopen them only when regressions or new product needs make them materially relevant again.
+- Recursive fan-out or fork-context edge cases can stay as targeted regression work instead of headline roadmap drivers.

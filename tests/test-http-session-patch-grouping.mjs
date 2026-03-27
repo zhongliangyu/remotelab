@@ -145,7 +145,7 @@ try {
 
   const patched = await request(port, 'PATCH', `/api/sessions/${sessionId}`, {
     group: '  RemoteLab  ',
-    description: '  Board-driven orchestration work.  ',
+    description: '  Session-driven orchestration work.  ',
     sidebarOrder: 4,
     entryMode: 'read',
   });
@@ -153,7 +153,7 @@ try {
   assert.equal(patched.json.session.group, 'RemoteLab', 'patch should trim and persist group');
   assert.equal(
     patched.json.session.description,
-    'Board-driven orchestration work.',
+    'Session-driven orchestration work.',
     'patch should trim and persist description',
   );
   assert.equal(patched.json.session.sidebarOrder, 4, 'patch should persist sidebar order');
@@ -164,7 +164,7 @@ try {
   assert.equal(detail.json.session.group, 'RemoteLab', 'detail route should expose patched group');
   assert.equal(
     detail.json.session.description,
-    'Board-driven orchestration work.',
+    'Session-driven orchestration work.',
     'detail route should expose patched description',
   );
   assert.equal(detail.json.session.sidebarOrder, 4, 'detail route should expose patched sidebar order');
@@ -177,7 +177,7 @@ try {
   assert.equal(listedSession.group, 'RemoteLab', 'session list should expose patched group');
   assert.equal(
     listedSession.description,
-    'Board-driven orchestration work.',
+    'Session-driven orchestration work.',
     'session list should expose patched description',
   );
   assert.equal(listedSession.sidebarOrder, 4, 'session list should expose patched sidebar order');

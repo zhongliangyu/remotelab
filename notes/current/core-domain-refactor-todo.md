@@ -857,7 +857,7 @@ The code should reflect that more clearly.
 
 - Remove Progress-specific backend state, routes, and frontend rendering logic.
 - Keep only the tab-shell behavior in the UI so the slot can host future non-session surfaces.
-- Ensure future task-progress UX is modeled through session-list grouping rather than a separate derived summary board.
+- Ensure future task-progress UX is modeled through session-list grouping rather than a separate derived summary surface.
 
 **Keep out of scope**
 

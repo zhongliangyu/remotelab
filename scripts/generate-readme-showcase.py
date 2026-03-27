@@ -8,8 +8,8 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = ROOT / "docs" / "readme-multisurface-demo.png"
 SOURCES = {
-    "mobile": ROOT / "docs" / "assets" / "readme-showcase" / "mobile-sidebar.png",
-    "desktop": ROOT / "docs" / "assets" / "readme-showcase" / "desktop-board.png",
+    "mobile": ROOT / "docs" / "new-dashboard.png",
+    "desktop": ROOT / "docs" / "new-dashboard.png",
     "bot": ROOT / "docs" / "assets" / "readme-showcase" / "feishu-chat.png",
 }
 CANVAS_SIZE = (2400, 1440)
@@ -77,7 +77,7 @@ def build_desktop_window(screen):
     return window, rounded_mask((outer_w, outer_h), radius)
 
 
-def build_phone(screen, body_w, body_h):
+def build_phone(screen, body_w, body_h, centering=(0.5, 0.0)):
     phone = Image.new("RGBA", (body_w, body_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(phone)
     outer_radius = 72
@@ -91,7 +91,7 @@ def build_phone(screen, body_w, body_h):
     draw.rounded_rectangle((screen_left, screen_top, screen_right, screen_bottom), radius=screen_radius, fill=(0, 0, 0))
     screen_width = screen_right - screen_left
     screen_height = screen_bottom - screen_top
-    screen = ImageOps.fit(screen, (screen_width, screen_height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.0))
+    screen = ImageOps.fit(screen, (screen_width, screen_height), method=Image.Resampling.LANCZOS, centering=centering)
     screen = sharpen(screen)
     phone.paste(screen, (screen_left, screen_top), rounded_mask((screen_width, screen_height), screen_radius))
     island_width, island_height = 132, 34
@@ -149,7 +149,7 @@ def render(output_path):
     canvas.alpha_composite(desktop_shadow, (desktop_position[0] + 10, desktop_position[1] + 24))
     canvas.alpha_composite(desktop_window, desktop_position)
 
-    left_phone = build_phone(Image.open(SOURCES["mobile"]).convert("RGBA"), 410, 840).rotate(-9, resample=Image.Resampling.BICUBIC, expand=True)
+    left_phone = build_phone(Image.open(SOURCES["mobile"]).convert("RGBA"), 410, 840, centering=(0.0, 0.0)).rotate(-9, resample=Image.Resampling.BICUBIC, expand=True)
     right_phone = build_phone(Image.open(SOURCES["bot"]).convert("RGBA"), 420, 850).rotate(8, resample=Image.Resampling.BICUBIC, expand=True)
     paste_with_shadow(canvas, left_phone, (45, 405), blur=18, alpha=108, offset=(5, 20))
     paste_with_shadow(canvas, right_phone, (1868, 350), blur=18, alpha=108, offset=(5, 22))

@@ -1,18 +1,25 @@
 function restoreOwnerSessionSelection() {
   if (visitorMode) return;
 
-  const requestedTab = pendingNavigationState?.tab || activeTab;
-  if (requestedTab !== activeTab) {
+  const currentTab = typeof getActiveSidebarTabValue === "function"
+    ? getActiveSidebarTabValue()
+    : activeTab;
+  const requestedTab = pendingNavigationState?.tab || currentTab;
+  if (requestedTab !== currentTab) {
     switchTab(requestedTab, { syncState: false });
   }
 
   const targetSession = resolveRestoreTargetSession();
   if (!targetSession) {
-    currentSessionId = null;
-    hasAttachedSession = false;
+    if (typeof setChatCurrentSession === "function") {
+      setChatCurrentSession(null, { hasAttachedSession: false });
+    } else {
+      currentSessionId = null;
+      hasAttachedSession = false;
+    }
     resetAttachedSessionRenderState();
     persistActiveSessionId(null);
-    syncBrowserState({ sessionId: null, tab: activeTab });
+    syncBrowserState({ sessionId: null, tab: getActiveSidebarTabValue() });
     showEmpty();
     restoreDraft();
     updateStatus("connected");
@@ -602,17 +609,27 @@ function normalizeSessionRecord(session, previous = null) {
 
 function upsertSession(session) {
   if (!session?.id) return null;
-  const previous = sessions.find((entry) => entry.id === session.id);
+  const previous = typeof getChatStoreSession === "function"
+    ? getChatStoreSession(session.id)
+    : sessions.find((entry) => entry.id === session.id);
   const normalized = normalizeSessionRecord(session, previous);
-  const index = sessions.findIndex((entry) => entry.id === session.id);
-  if (index === -1) {
-    sessions.push(normalized);
+  if (typeof upsertChatSessionState === "function") {
+    upsertChatSessionState(normalized, {
+      compareSessions: typeof compareClientSessions === "function" ? compareClientSessions : null,
+    });
   } else {
-    sessions[index] = normalized;
+    const index = sessions.findIndex((entry) => entry.id === session.id);
+    if (index === -1) {
+      sessions.push(normalized);
+    } else {
+      sessions[index] = normalized;
+    }
+    sortSessionsInPlace();
   }
-  sortSessionsInPlace();
   refreshAppCatalog();
-  return normalized;
+  return typeof getChatStoreSession === "function"
+    ? getChatStoreSession(session.id)
+    : normalized;
 }
 
 
@@ -628,14 +645,25 @@ async function fetchArchivedSessions({ forceFresh = false } = {}) {
     return archivedSessionsRefreshPromise;
   }
   if (!archivedSessionsLoaded && archivedSessionCount === 0) {
-    archivedSessionsLoaded = true;
-    archivedSessionsLoading = false;
+    if (typeof replaceChatState === "function") {
+      replaceChatState({
+        archivedSessionsLoaded: true,
+        archivedSessionsLoading: false,
+      });
+    } else {
+      archivedSessionsLoaded = true;
+      archivedSessionsLoading = false;
+    }
     lastArchivedSessionsRefreshAt = Date.now();
     renderSessionList();
     return [];
   }
 
-  archivedSessionsLoading = true;
+  if (typeof setChatArchivedSessionsLoading === "function") {
+    setChatArchivedSessionsLoading(true);
+  } else {
+    archivedSessionsLoading = true;
+  }
   renderSessionList();
   const request = (async () => {
     try {
@@ -651,7 +679,11 @@ async function fetchArchivedSessions({ forceFresh = false } = {}) {
       lastArchivedSessionsRefreshAt = Date.now();
       return nextArchivedSessions;
     } catch (error) {
-      archivedSessionsLoading = false;
+      if (typeof setChatArchivedSessionsLoading === "function") {
+        setChatArchivedSessionsLoading(false);
+      } else {
+        archivedSessionsLoading = false;
+      }
       renderSessionList();
       throw error;
     } finally {
@@ -754,8 +786,12 @@ function applyAttachedSessionState(id, session) {
   const nextSignature = getComparableAttachedSessionStateSignature(session || null);
   const shouldRefreshUi = attachedSessionRenderState.sessionId !== id
     || attachedSessionRenderState.signature !== nextSignature;
-  currentSessionId = id;
-  hasAttachedSession = true;
+  if (typeof setChatCurrentSession === "function") {
+    setChatCurrentSession(id, { hasAttachedSession: true });
+  } else {
+    currentSessionId = id;
+    hasAttachedSession = true;
+  }
   if (!shouldRefreshUi) {
     syncBrowserState();
     syncForkButton();
@@ -884,7 +920,9 @@ async function fetchSessionState(sessionId, { forceFresh = false } = {}) {
     `/api/sessions/${encodeURIComponent(sessionId)}`,
     buildSessionRefreshRequestOptions(forceFresh),
   );
-  const previous = sessions.find((entry) => entry.id === sessionId) || null;
+  const previous = typeof getChatStoreSession === "function"
+    ? getChatStoreSession(sessionId)
+    : (sessions.find((entry) => entry.id === sessionId) || null);
   const nextSession = normalizeSessionRecord(data.session, previous);
   const sessionChanged = !previous
     || getComparableSessionStateSignature(previous) !== getComparableSessionStateSignature(nextSession);
@@ -1070,7 +1108,13 @@ async function refreshSidebarSession(sessionId) {
       if (error?.message === "Session not found") {
         const nextSessions = sessions.filter((session) => session.id !== sessionId);
         if (nextSessions.length !== sessions.length) {
-          sessions = nextSessions;
+          if (typeof removeChatSessionState === "function") {
+            removeChatSessionState(sessionId, {
+              compareSessions: typeof compareClientSessions === "function" ? compareClientSessions : null,
+            });
+          } else {
+            sessions = nextSessions;
+          }
           refreshAppCatalog();
           renderSessionList();
         }
@@ -1140,7 +1184,11 @@ function startParallelCurrentSessionBootstrap() {
 
 async function bootstrapViaHttp({ deferOwnerRestore = false } = {}) {
   if (visitorMode && visitorSessionId) {
-    currentSessionId = visitorSessionId;
+    if (typeof setChatCurrentSession === "function") {
+      setChatCurrentSession(visitorSessionId, { hasAttachedSession: false });
+    } else {
+      currentSessionId = visitorSessionId;
+    }
     attachSession(visitorSessionId, { id: visitorSessionId, name: "Session", status: "idle" });
     await refreshCurrentSession();
     return;
@@ -1160,14 +1208,34 @@ async function bootstrapShareSnapshotView() {
     showEmpty();
     return null;
   }
-  sessions = [normalizeSessionRecord(session, sessions.find((entry) => entry.id === session.id) || null)];
-  hasLoadedSessions = true;
-  archivedSessionCount = 0;
-  archivedSessionsLoaded = false;
+  const normalizedSession = normalizeSessionRecord(
+    session,
+    typeof getChatStoreSession === "function"
+      ? getChatStoreSession(session.id)
+      : (sessions.find((entry) => entry.id === session.id) || null),
+  );
+  if (typeof replaceChatState === "function") {
+    replaceChatState({
+      sessions: [normalizedSession],
+      hasLoadedSessions: true,
+      archivedSessionCount: 0,
+      archivedSessionsLoaded: false,
+      archivedSessionsLoading: false,
+      currentSessionId: session.id,
+      hasAttachedSession: false,
+    }, {
+      compareSessions: typeof compareClientSessions === "function" ? compareClientSessions : null,
+    });
+  } else {
+    sessions = [normalizedSession];
+    hasLoadedSessions = true;
+    archivedSessionCount = 0;
+    archivedSessionsLoaded = false;
+    currentSessionId = session.id;
+  }
   visitorSessionId = session.id;
-  currentSessionId = session.id;
-  attachSession(session.id, sessions[0]);
-  return sessions[0];
+  attachSession(session.id, normalizedSession);
+  return normalizedSession;
 }
 
 async function setupPushNotifications() {

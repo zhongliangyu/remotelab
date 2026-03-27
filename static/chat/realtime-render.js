@@ -115,6 +115,10 @@ function renderEvent(evt, autoScroll) {
       rendered = true;
       renderContextBarrier(evt);
       break;
+    case "context_operation":
+      rendered = true;
+      renderContextOperation(evt);
+      break;
     case "usage":
       rendered = true;
       renderUsage(evt);

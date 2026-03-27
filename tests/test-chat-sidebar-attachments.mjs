@@ -7,6 +7,7 @@ import vm from 'vm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
+const composerStoreSource = readFileSync(join(repoRoot, 'static', 'chat', 'composer-store.js'), 'utf8');
 const sidebarUiSource = readFileSync(join(repoRoot, 'static', 'chat', 'sidebar-ui.js'), 'utf8');
 
 function extractFunctionSource(source, functionName) {
@@ -53,7 +54,7 @@ function createHarness({ locked = false } = {}) {
   };
   const context = {
     console,
-    pendingImages: [],
+    currentSessionId: 'session-a',
     URL: {
       createObjectURL(file) {
         const objectUrl = `blob:${file.name}`;
@@ -71,6 +72,7 @@ function createHarness({ locked = false } = {}) {
   context.globalThis = context;
   vm.runInNewContext(
     [
+      composerStoreSource,
       buildPendingAttachmentSource,
       addAttachmentFilesSource,
       'globalThis.addAttachmentFiles = addAttachmentFiles;',
@@ -95,9 +97,9 @@ const secondBatch = Array.from({ length: 3 }, (_, index) => ({
 const openHarness = createHarness();
 await openHarness.context.addAttachmentFiles(firstBatch);
 await openHarness.context.addAttachmentFiles(secondBatch);
-assert.equal(openHarness.context.pendingImages.length, 6, 'attachment picker should preserve every selected file instead of truncating at four');
+assert.equal(openHarness.context.getComposerAttachmentsState('session-a').length, 6, 'attachment picker should preserve every selected file instead of truncating at four');
 assert.deepEqual(
-  openHarness.context.pendingImages.map((image) => image.originalName),
+  Array.from(openHarness.context.getComposerAttachmentsState('session-a'), (image) => image.originalName),
   [...firstBatch, ...secondBatch].map((file) => file.name),
   'attachment picker should append each batch in order',
 );
@@ -106,7 +108,7 @@ assert.equal(openHarness.state.renderCalls, 2, 'attachment picker should rerende
 
 const lockedHarness = createHarness({ locked: true });
 await lockedHarness.context.addAttachmentFiles([...firstBatch, ...secondBatch]);
-assert.equal(lockedHarness.context.pendingImages.length, 0, 'attachment picker should ignore new files while a send is already pending');
+assert.equal(lockedHarness.context.getComposerAttachmentsState('session-a').length, 0, 'attachment picker should ignore new files while a send is already pending');
 assert.equal(lockedHarness.state.objectUrls.length, 0, 'locked composer should not allocate preview URLs');
 assert.equal(lockedHarness.state.renderCalls, 0, 'locked composer should not rerender the preview strip');
 

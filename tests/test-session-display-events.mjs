@@ -250,4 +250,28 @@ assert.deepEqual(
   'expanded folded blocks should still expose manager context when explicitly opened',
 );
 
+const contextOperationHistory = [
+  { seq: 1, type: 'message', role: 'user', content: '继续处理这个会话' },
+  { seq: 2, type: 'status', role: 'system', content: 'Preparing environment' },
+  { seq: 3, type: 'reasoning', role: 'assistant', content: 'Checking context pressure' },
+  {
+    seq: 4,
+    type: 'context_operation',
+    role: 'system',
+    title: 'Live context compacted',
+    summary: 'Older live context was replaced with a continuation summary and handoff.',
+    reason: 'Live context exceeded the model window',
+    phase: 'applied',
+    trigger: 'automatic',
+  },
+  { seq: 5, type: 'message', role: 'assistant', content: '我已经把旧上下文压成了延续包。' },
+];
+
+const contextOperationDisplay = buildSessionDisplayEvents(contextOperationHistory, { sessionRunning: false });
+assert.deepEqual(
+  contextOperationDisplay.map((event) => event.type),
+  ['message', 'thinking_block', 'context_operation', 'message'],
+  'context operations should stay visible in the main transcript instead of being folded into the hidden implementation block',
+);
+
 console.log('test-session-display-events: ok');

@@ -19,6 +19,8 @@ Read these first when you need the current truth:
 6. `../notes/current/product-surface-lifecycle.md` — current keep/iterate/retire rule for shipped product surfaces
 7. `setup.md` / `external-message-protocol.md` / other focused guides as needed
 8. `../notes/current/session-first-workflow-surfaces.md` — internal workflow-organization contract for session list / grouping / task-like views
+9. `../notes/current/model-sovereign-control-architecture.md` — current ownership model for manager, prompt, memory, and durable work-state boundaries
+10. `../notes/current/session-control-state-phase1.md` — current carrier-to-object mapping and first code landing for manager/work-state projection
 
 ## Keep These In Sync
 
@@ -58,6 +60,8 @@ For setup, deployment, connector, and feature-rollout docs, assume the operator 
 - `../notes/current/product-mainline.md` — current product operating loop and shared feedback-recording rule
 - `../notes/current/product-surface-lifecycle.md` — current rule that shipped features stay reviewable and may later be simplified or retired
 - `../notes/current/session-first-workflow-surfaces.md` — current workflow-organization rule for session list / grouping / task-like views
+- `../notes/current/model-sovereign-control-architecture.md` — current control-layer ownership model for prompt, memory, manager state, and refactor direction
+- `../notes/current/session-control-state-phase1.md` — current implementation mapping for manager/work-state projection and Phase 1 boundary cleanup
 
 ### Focused Integrations
 

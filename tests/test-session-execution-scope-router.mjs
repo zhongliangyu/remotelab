@@ -186,20 +186,14 @@ try {
   );
 
   const promptLog = readFileSync(promptLogPath, 'utf8');
-  assert.match(promptLog, /Likely scope-router matches for this turn \(backend-selected from projects\.md\):/);
-  assert.match(promptLog, /报账支出流程/);
-  assert.match(promptLog, /first read: ~\/\.remotelab\/instances\/trial6\/memory\/tasks\/reimbursement-expense-workflow\.md/);
-  assert.match(promptLog, /then inspect: ~\/\.remotelab\/instances\/trial6\/config\/file-assets\/reimbursement\/报账支出主表\.xlsx/);
-  assert.match(promptLog, /default action: 收到新的报账邮件后/);
-  assert.match(promptLog, /Recent related session imports for this turn \(backend-selected cross-session packet\):/);
-  assert.match(promptLog, /\[Mail\] 历史报账规则/);
-  assert.match(promptLog, /matched via:/);
-  assert.match(promptLog, /之前已经确认：报账邮件默认沿用现有主表追加，不重新建表。/);
-  assert.match(promptLog, /沿用现有报账主表，不要新建文件。/);
-  assert.match(promptLog, /所有报账都要追加到同一个 Excel 主表。/);
-  assert.match(promptLog, /Use machine-wide search only after targeted context misses\./);
-  assert.match(promptLog, /For loosely structured inbound email, use the sender, subject, body, and attachments as routing clues/);
-  assert.match(promptLog, /Prefer matched memory, project notes, and referenced files before broad local or machine-wide search\./);
+  assert.match(promptLog, /lightweight external context hook/);
+  assert.match(promptLog, /Stable context entry points:/);
+  assert.match(promptLog, /Projects: ~\/\.remotelab\/memory\/projects\.md/);
+  assert.match(promptLog, /Tasks directory: ~\/\.remotelab\/memory\/tasks\//);
+  assert.match(promptLog, /Model-managed writable context root:/);
+  assert.match(promptLog, /~\/\.remotelab\/memory\/model-context/);
+  assert.doesNotMatch(promptLog, /Likely scope-router matches for this turn/);
+  assert.doesNotMatch(promptLog, /Recent related session imports for this turn/);
 
   console.log('test-session-execution-scope-router: ok');
 } finally {

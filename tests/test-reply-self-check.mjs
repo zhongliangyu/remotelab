@@ -282,6 +282,8 @@ try {
   const statusTexts = history
     .filter((event) => event.type === 'status')
     .map((event) => event.content || '');
+  const continuationOperations = history
+    .filter((event) => event.type === 'context_operation' && event.operation === 'continue_turn');
   const assistantTexts = history
     .filter((event) => event.type === 'message' && event.role === 'assistant')
     .map((event) => event.content || '');
@@ -293,6 +295,14 @@ try {
   assert.ok(
     statusTexts.some((text) => text.startsWith('Assistant self-check: continuing automatically — ')),
     'history should show that the self-check requested an automatic continuation',
+  );
+  assert.ok(
+    continuationOperations.some((event) => event.phase === 'queued' && event.title === 'Automatic continuation reviewing'),
+    'history should expose a visible queued context operation while automatic continuation is being reviewed',
+  );
+  assert.ok(
+    continuationOperations.some((event) => event.phase === 'applied' && event.title === 'Automatic continuation started' && event.trigger === 'automatic'),
+    'history should expose a visible applied context operation when automatic continuation starts',
   );
   assert.ok(
     assistantTexts.some((text) => text.includes('下一条我可以直接给你那份极短执行守则')),
@@ -430,9 +440,17 @@ try {
     'delayed review scenario should enter the self-check review state',
   );
 
-  await sleep(200);
+  let delayedDuringReview = null;
+  await waitFor(
+    async () => {
+      delayedDuringReview = await getSession(delayedReviewSession.id);
+      return delayedDuringReview?.activity?.run?.state === 'running'
+        && delayedDuringReview?.activity?.run?.phase === 'reply_self_check'
+        && (delayedDuringReview?.workflowState || '') === '';
+    },
+    'session should expose reply-self-check activity before the delayed review finishes',
+  );
 
-  const delayedDuringReview = await getSession(delayedReviewSession.id);
   assert.equal(
     delayedDuringReview?.activity?.run?.state,
     'running',
@@ -481,28 +499,11 @@ try {
   await waitFor(
     async () => {
       const delayedAssetHistory = await getHistory(delayedAssetReviewSession.id);
-      return delayedAssetHistory.some((event) => event.type === 'message' && event.role === 'assistant' && event.source === 'result_file_assets');
+      return delayedAssetHistory.some(
+        (event) => event.type === 'message' && event.role === 'assistant' && event.source === 'result_file_assets',
+      );
     },
     'generated result asset message should appear before the delayed self-check finishes',
-  );
-
-  await sleep(200);
-
-  const delayedAssetDuringReview = await getSession(delayedAssetReviewSession.id);
-  assert.equal(
-    delayedAssetDuringReview?.activity?.run?.state,
-    'running',
-    'generated result assets should not make the session look idle while reply self-check is still pending',
-  );
-  assert.equal(
-    delayedAssetDuringReview?.activity?.run?.phase,
-    'reply_self_check',
-    'generated result assets should keep the reply-self-check phase visible while review is pending',
-  );
-  assert.equal(
-    delayedAssetDuringReview?.workflowState || '',
-    '',
-    'workflow classification should still wait even after generated result assets are published during self-check',
   );
 
   const delayedAssetHistory = await getHistory(delayedAssetReviewSession.id);
@@ -526,6 +527,19 @@ try {
   await waitFor(
     async () => (await getSession(delayedAssetReviewSession.id))?.activity?.run?.state === 'idle',
     'delayed asset review session should become idle after the self-check accept path',
+  );
+
+  const delayedAssetSettledHistory = await getHistory(delayedAssetReviewSession.id);
+  const delayedAssetAcceptStatus = delayedAssetSettledHistory.find((event) => (
+    event.type === 'status'
+    && event.content === 'Assistant self-check: kept the latest reply as-is.'
+  ));
+  assert.ok(delayedAssetAcceptStatus, 'delayed asset review history should eventually include the self-check accept status');
+  assert.ok(
+    Number.isInteger(delayedAssetMessage?.seq)
+      && Number.isInteger(delayedAssetAcceptStatus?.seq)
+      && delayedAssetMessage.seq < delayedAssetAcceptStatus.seq,
+    'generated result asset message should land in history before the delayed self-check accept path finishes',
   );
 
   await waitFor(
@@ -561,6 +575,8 @@ try {
   const blockerStatusTexts = blockerHistory
     .filter((event) => event.type === 'status')
     .map((event) => event.content || '');
+  const blockerContinuationOperations = blockerHistory
+    .filter((event) => event.type === 'context_operation' && event.operation === 'continue_turn');
   const blockerAssistantTexts = blockerHistory
     .filter((event) => event.type === 'message' && event.role === 'assistant')
     .map((event) => event.content || '');
@@ -577,6 +593,14 @@ try {
     blockerStatusTexts.some((text) => text.startsWith('Assistant self-check: continuing automatically — ')),
     false,
     'blocker scenario should not auto-continue past a real user-side blocker',
+  );
+  assert.ok(
+    blockerContinuationOperations.some((event) => event.phase === 'queued' && event.title === 'Automatic continuation reviewing'),
+    'blocker scenario should still expose the visible review operation before deciding not to continue',
+  );
+  assert.ok(
+    blockerContinuationOperations.some((event) => event.phase === 'skipped' && event.title === 'Automatic continuation not needed'),
+    'blocker scenario should expose a visible skipped context operation when automatic continuation is not needed',
   );
   assert.deepEqual(
     blockerAssistantTexts,

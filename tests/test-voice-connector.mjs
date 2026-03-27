@@ -191,8 +191,6 @@ try {
     metadata: { microphone: 'usb' },
   })
 
-  assert.equal(createPayload?.appId, 'voice')
-  assert.equal(createPayload?.appName, 'Voice')
   assert.equal(createPayload?.sourceId, 'voice')
   assert.equal(createPayload?.sourceName, 'Voice')
   assert.equal(createPayload?.systemPrompt, '')

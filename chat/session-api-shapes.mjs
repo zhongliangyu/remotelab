@@ -8,7 +8,6 @@ function stripSessionShape(session, {
 } = {}) {
   if (!session || typeof session !== 'object') return null;
   const cloned = cloneJson(session);
-  delete cloned.board;
   delete cloned.task;
   delete cloned.sourceContext;
   if (!includeQueuedMessages) {

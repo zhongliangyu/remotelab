@@ -23,8 +23,8 @@ const baseFolder = join(tempHome, 'workspace');
 
 try {
   const genericFeishu = await createSession(baseFolder, 'codex', 'Feishu group', {
-    appId: 'feishu',
-    appName: 'Feishu',
+    sourceId: 'feishu',
+    sourceName: 'Feishu',
     group: 'Feishu',
     externalTriggerId: 'feishu:group:chat_1',
   });
@@ -32,8 +32,8 @@ try {
   assert.equal(genericFeishu.autoRenamePending, true, 'generic connector titles should remain auto-renameable');
 
   const explicitGithub = await createSession(baseFolder, 'codex', 'GitHub: owner/repo#7 — macOS build failure', {
-    appId: 'github',
-    appName: 'GitHub',
+    sourceId: 'github',
+    sourceName: 'GitHub',
     group: 'GitHub',
     externalTriggerId: 'github:owner/repo#7',
   });
@@ -45,8 +45,8 @@ try {
   assert.equal(explicitGithub.autoRenamePending, false, 'explicit connector titles should not stay pending');
 
   const explicitChinese = await createSession(baseFolder, 'codex', '飞书：支付接口报错', {
-    appId: 'feishu',
-    appName: '飞书',
+    sourceId: 'feishu',
+    sourceName: '飞书',
     group: '飞书',
     externalTriggerId: 'feishu:group:chat_2',
   });
@@ -54,8 +54,8 @@ try {
   assert.equal(explicitChinese.autoRenamePending, false, 'explicit Chinese connector titles should be preserved');
 
   const upgradedReuse = await createSession(baseFolder, 'codex', 'Feishu group', {
-    appId: 'feishu',
-    appName: 'Feishu',
+    sourceId: 'feishu',
+    sourceName: 'Feishu',
     group: 'Feishu',
     externalTriggerId: 'feishu:group:chat_3',
   });
@@ -63,8 +63,8 @@ try {
   assert.equal(upgradedReuse.autoRenamePending, true);
 
   const enrichedReuse = await createSession(baseFolder, 'codex', '飞书：修复支付回调', {
-    appId: 'feishu',
-    appName: '飞书',
+    sourceId: 'feishu',
+    sourceName: '飞书',
     group: '飞书',
     externalTriggerId: 'feishu:group:chat_3',
   });
@@ -73,8 +73,8 @@ try {
   assert.equal(enrichedReuse.autoRenamePending, false, 'later explicit context should clear pending auto-rename');
 
   const chatVisitor = await createSession(baseFolder, 'codex', 'Template App', {
-    appId: 'visitor-template',
-    appName: 'Template App',
+    templateId: 'visitor-template',
+    templateName: 'Template App',
     sourceId: 'chat',
     sourceName: 'Chat',
     externalTriggerId: 'visitor_session:template:visitor_1',

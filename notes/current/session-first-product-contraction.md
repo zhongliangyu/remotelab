@@ -108,7 +108,8 @@ For those fields, the preferred migration order is:
 - `/api/apps*`, `/api/users*`, `/api/visitors*`, `/app/:shareToken`, and `/visitor/:shareToken` are now removed from the active product surface rather than kept as explicit retirement stubs.
 - Share snapshots remain the only public share surface.
 - Owner bootstrap Welcome now lands as a normal starter session with a seeded assistant opening message instead of a product-visible Welcome app flow.
-- Active session presentation and prompt-routing paths now read canonical `sourceId` / `sourceName`; legacy app-scoped metadata is only normalized forward, not used as the steady-state read model.
+- Active session presentation, connector routing, fork/delegate inheritance, and template application now read canonical `sourceId` / `sourceName` plus `templateId` / `templateName`.
+- Legacy session `appId` / `appName` fields may still exist in old stored records, but the runtime no longer reads them on the main path.
 
 ---
 

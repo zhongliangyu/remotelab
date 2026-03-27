@@ -59,7 +59,7 @@ These fields should be treated as:
 - derived control-surface state
 - never the permission system
 
-The browser then becomes less of a “chat window only” product and more of a lightweight board of ongoing AI work.
+The browser then becomes less of a “chat window only” product and more of a lightweight control surface for ongoing AI work.
 
 ---
 

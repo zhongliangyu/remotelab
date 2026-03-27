@@ -6,6 +6,8 @@
     "/marked.min.js",
     "/chat/i18n.js",
     "/chat/session-state-model.js",
+    "/chat/session-store.js",
+    "/chat/composer-store.js",
     "/chat/icons.js",
     "/chat/bootstrap.js",
     "/chat/bootstrap-session-catalog.js",

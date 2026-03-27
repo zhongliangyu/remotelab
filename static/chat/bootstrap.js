@@ -161,6 +161,9 @@ function updateFrontendRefreshUi() {
 }
 
 function hasUnsavedComposerState() {
+  if (typeof hasAnyComposerUnsavedState === "function") {
+    return hasAnyComposerUnsavedState();
+  }
   if (typeof hasPendingComposerSend === "function" && hasPendingComposerSend()) {
     return true;
   }
@@ -288,7 +291,6 @@ refreshFrontendBtn?.addEventListener("click", () => {
 });
 
 let ws = null;
-let pendingImages = [];
 const ACTIVE_SESSION_STORAGE_KEY = "activeSessionId";
 const ACTIVE_SIDEBAR_TAB_STORAGE_KEY = "activeSidebarTab";
 const LEGACY_ACTIVE_SOURCE_FILTER_STORAGE_KEY = "activeAppFilter";
@@ -305,6 +307,10 @@ const DEFAULT_APP_NAME = "Chat";
 const sessionStateModel = window.RemoteLabSessionStateModel;
 if (!sessionStateModel) {
   throw new Error("RemoteLabSessionStateModel must load before bootstrap.js");
+}
+const chatStoreModel = window.RemoteLabChatStore;
+if (!chatStoreModel) {
+  throw new Error("RemoteLabChatStore must load before bootstrap.js");
 }
 
 function normalizeSidebarTab(tab) {
@@ -387,6 +393,209 @@ const renderedEventState = {
   runState: "idle",
   runningBlockExpanded: false,
 };
+
+const chatStore = chatStoreModel.createStore({
+  sessions,
+  currentSessionId,
+  hasAttachedSession,
+  hasLoadedSessions,
+  archivedSessionCount,
+  archivedSessionsLoaded,
+  archivedSessionsLoading,
+  activeSourceFilter:
+    localStorage.getItem(ACTIVE_SOURCE_FILTER_STORAGE_KEY)
+    || localStorage.getItem(LEGACY_ACTIVE_SOURCE_FILTER_STORAGE_KEY)
+    || FILTER_ALL_VALUE,
+  activeTab: normalizeSidebarTab(
+    pendingNavigationState.tab
+    || localStorage.getItem(ACTIVE_SIDEBAR_TAB_STORAGE_KEY)
+    || "sessions",
+  ),
+  sessionStatus,
+});
+
+function syncChatStoreGlobals(nextState = chatStore.getState()) {
+  currentSessionId = nextState.currentSessionId;
+  hasAttachedSession = nextState.hasAttachedSession;
+  sessionStatus = nextState.sessionStatus;
+  sessions = nextState.sessions;
+  hasLoadedSessions = nextState.hasLoadedSessions;
+  archivedSessionCount = nextState.archivedSessionCount;
+  archivedSessionsLoaded = nextState.archivedSessionsLoaded;
+  archivedSessionsLoading = nextState.archivedSessionsLoading;
+}
+
+chatStore.subscribe((nextState) => {
+  syncChatStoreGlobals(nextState);
+});
+syncChatStoreGlobals();
+
+function getChatStore() {
+  return chatStore;
+}
+
+function getChatStoreStateSnapshot() {
+  return chatStore.getState();
+}
+
+function dispatchChatStore(action) {
+  return chatStore.dispatch(action);
+}
+
+function getChatStoreFallbackState() {
+  return chatStoreModel.createState({
+    sessions,
+    currentSessionId,
+    hasAttachedSession,
+    hasLoadedSessions,
+    archivedSessionCount,
+    archivedSessionsLoaded,
+    archivedSessionsLoading,
+    activeSourceFilter: getActiveSourceFilterValue(),
+    activeTab: getActiveSidebarTabValue(),
+    sessionStatus,
+  });
+}
+
+function reduceChatStoreFallback(reducer, ...args) {
+  const nextState = reducer(getChatStoreFallbackState(), ...args);
+  syncChatStoreGlobals(nextState);
+  return nextState;
+}
+
+function replaceChatState(state = {}, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "replace-state",
+      state,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.replaceState, state, options);
+}
+
+function replaceActiveChatSessionsState(nextSessions = [], options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "replace-active-sessions",
+      sessions: nextSessions,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.replaceActiveSessions, nextSessions, options);
+}
+
+function replaceArchivedChatSessionsState(nextSessions = [], options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "replace-archived-sessions",
+      sessions: nextSessions,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.replaceArchivedSessions, nextSessions, options);
+}
+
+function upsertChatSessionState(session, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "upsert-session",
+      session,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.upsertSession, session, options);
+}
+
+function removeChatSessionState(sessionId, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "remove-session",
+      sessionId,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.removeSession, sessionId, options);
+}
+
+function setChatCurrentSession(sessionId, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "set-current-session",
+      sessionId,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.setCurrentSession, sessionId, options);
+}
+
+function setChatArchivedSessionsLoading(value) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "set-archived-sessions-loading",
+      value,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.setArchivedSessionsLoading, value);
+}
+
+function setChatActiveSourceFilter(value, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "set-active-source-filter",
+      value,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.setActiveSourceFilter, value, options);
+}
+
+function setChatActiveTab(value, options = {}) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "set-active-tab",
+      value,
+      ...options,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.setActiveTab, value, options);
+}
+
+function setChatSessionStatus(value) {
+  if (typeof dispatchChatStore === "function") {
+    return dispatchChatStore({
+      type: "set-session-status",
+      value,
+    });
+  }
+  return reduceChatStoreFallback(chatStoreModel.setSessionStatus, value);
+}
+
+function getActiveSidebarTabValue() {
+  const storeValue = getChatStoreStateSnapshot()?.activeTab;
+  if (typeof storeValue === "string" && storeValue.trim()) {
+    return normalizeSidebarTab(storeValue);
+  }
+  return normalizeSidebarTab(
+    pendingNavigationState.tab
+    || localStorage.getItem(ACTIVE_SIDEBAR_TAB_STORAGE_KEY)
+    || "sessions",
+  );
+}
+
+function getActiveSourceFilterValue() {
+  const value = getChatStoreStateSnapshot()?.activeSourceFilter;
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  return localStorage.getItem(ACTIVE_SOURCE_FILTER_STORAGE_KEY)
+    || localStorage.getItem(LEGACY_ACTIVE_SOURCE_FILTER_STORAGE_KEY)
+    || FILTER_ALL_VALUE;
+}
+
+function getChatStoreSession(sessionId = currentSessionId) {
+  return chatStoreModel.findSession(getChatStoreStateSnapshot(), sessionId);
+}
 
 function setRunningEventBlockExpanded(sessionId, expanded) {
   if (!sessionId || renderedEventState.sessionId !== sessionId) return;

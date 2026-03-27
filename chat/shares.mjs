@@ -170,6 +170,21 @@ async function sanitizeEvent(event, shareId) {
         role: event.role,
         content: typeof event.content === 'string' ? event.content : '',
       };
+    case 'context_operation':
+      return {
+        type: 'context_operation',
+        id: event.id,
+        timestamp: event.timestamp,
+        role: event.role,
+        content: typeof event.content === 'string' ? event.content : '',
+        ...(typeof event.operation === 'string' && event.operation ? { operation: event.operation } : {}),
+        ...(typeof event.phase === 'string' && event.phase ? { phase: event.phase } : {}),
+        ...(typeof event.title === 'string' && event.title ? { title: event.title } : {}),
+        ...(typeof event.summary === 'string' && event.summary ? { summary: event.summary } : {}),
+        ...(typeof event.reason === 'string' && event.reason ? { reason: event.reason } : {}),
+        ...(typeof event.trigger === 'string' && event.trigger ? { trigger: event.trigger } : {}),
+        ...(Number.isInteger(event.compactedThroughSeq) ? { compactedThroughSeq: event.compactedThroughSeq } : {}),
+      };
     case 'usage':
       {
       return {

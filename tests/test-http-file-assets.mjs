@@ -19,6 +19,21 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function safeRm(target, attempts = 6, delayMs = 120) {
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      rmSync(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error?.code !== 'ENOTEMPTY' && error?.code !== 'EBUSY') {
+        throw error;
+      }
+      await sleep(delayMs * (index + 1));
+    }
+  }
+  rmSync(target, { recursive: true, force: true });
+}
+
 async function waitFor(predicate, description, timeoutMs = 15000, intervalMs = 100) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -318,7 +333,7 @@ try {
   } finally {
     await stopServer(chatServer);
     await new Promise((resolve) => storageServer.close(resolve));
-    rmSync(home, { recursive: true, force: true });
+    await safeRm(home);
   }
   console.log('test-http-file-assets: ok');
 } catch (error) {

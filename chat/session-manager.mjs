@@ -19,7 +19,7 @@ import {
   setForkContext,
   setContextHead,
 } from './history.mjs';
-import { managerContextEvent, messageEvent, statusEvent } from './normalizer.mjs';
+import { contextOperationEvent, managerContextEvent, messageEvent, statusEvent } from './normalizer.mjs';
 import {
   triggerSessionLabelSuggestion,
   triggerSessionTaskCardSuggestion,
@@ -28,16 +28,17 @@ import {
 import { buildSourceRuntimePrompt } from './source-runtime-prompts.mjs';
 import { sendCompletionPush } from './push.mjs';
 import { buildSystemContext } from './system-prompt.mjs';
-import { MANAGER_TURN_POLICY_REMINDER } from './runtime-policy.mjs';
 import {
-  buildSessionAgreementsPromptBlock,
   normalizeSessionAgreements,
 } from './session-agreements.mjs';
 import {
-  buildSessionContinuationContextFromBody,
   prepareSessionContinuationBody,
 } from './session-continuation.mjs';
-import { buildTurnRoutingHint } from './session-routing.mjs';
+import {
+  buildPreparedContinuationPromptFromWorkState,
+  buildSessionControlState,
+  buildSessionWorkState,
+} from './session-control-state.mjs';
 import { broadcastOwners, getClientsMatching } from './ws-clients.mjs';
 import {
   buildTemporarySessionName,
@@ -68,6 +69,7 @@ import {
   isTerminalRunState,
   listRunIds,
   materializeRunSpoolLine,
+  readRunSpoolDelta,
   readRunSpoolRecords,
   requestRunCancel,
   runDir,
@@ -97,15 +99,12 @@ import {
   getApp,
   getBuiltinApp,
   normalizeAppId,
-  resolveEffectiveAppId,
 } from './apps.mjs';
 import { publishLocalFileAssetFromPath } from './file-assets.mjs';
 import { ensureDir, pathExists, statOrNull } from './fs-utils.mjs';
 import {
-  buildTaskCardPromptBlock,
   normalizeSessionTaskCard,
 } from './session-task-card.mjs';
-import { loadExecutionMemoryPromptContext } from './session-label-context.mjs';
 import {
   buildDelegationHandoff,
   clipCompactionSection,
@@ -129,7 +128,9 @@ import {
   parseReplySelfCheckDecision,
   summarizeReplySelfCheckReason,
 } from './session-reply-self-check.mjs';
+import { createSessionTurnCompletionHelpers } from './session-turn-completion.mjs';
 import { extractTaggedBlock } from './session-text-parsing.mjs';
+import { buildTurnContextHook } from './turn-context-hook.mjs';
 
 const MIME_EXTENSIONS = {
   'application/json': '.json',
@@ -171,16 +172,6 @@ const REPLY_SELF_REPAIR_INTERNAL_OPERATION = 'reply_self_repair';
 const REPLY_SELF_CHECK_REVIEWING_STATUS = 'Assistant self-check: reviewing the latest reply for early stop…';
 const REPLY_SELF_CHECK_ACCEPT_STATUS = 'Assistant self-check: kept the latest reply as-is.';
 const REPLY_SELF_CHECK_DEFAULT_REASON = 'the latest reply left avoidable unfinished work';
-
-const TURN_ACTIVATION_CARD = wrapPrivatePromptBlock([
-  'Turn activation — keep these principles active for this reply:',
-  '- Finish clear, low-risk work to a meaningful stopping point instead of pausing early for permission.',
-  '- Judge pauses branch-first: before asking anything, decide whether this turn has a real logical fork or forced human checkpoint; do not ask merely whether to continue.',
-  '- If the work is still on a single obvious track, treat the current request as standing authorization and keep going.',
-  '- Pause only for real ambiguity, missing required user input, or a meaningfully destructive / irreversible action.',
-  '- Default to concise, state-first updates: current execution state, then whether the user is needed now or the work can stay parked; avoid implementation noise like memory-file, repo, remote, branch, or checkpoint detail unless the user asks for it.',
-  '- Treat multi-goal routing as a first-order judgment: bounded work deserves bounded context, so split independently completable work instead of flattening it into one thread.',
-].join('\n'));
 
 const FOLLOW_UP_FLUSH_DELAY_MS = 1500;
 const MAX_RECENT_FOLLOW_UP_REQUEST_IDS = 100;
@@ -380,7 +371,27 @@ function buildDelegationNoticeMessage(task, childSession) {
   ].filter(Boolean).join('\n');
 }
 
-function normalizeSessionAppName(value) {
+function buildDelegationContextOperation(task, childSession) {
+  const normalizedTask = clipCompactionSection(task, 240)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const childName = typeof childSession?.name === 'string'
+    ? childSession.name.trim()
+    : 'new session';
+  const childId = typeof childSession?.id === 'string' ? childSession.id.trim() : '';
+
+  return contextOperationEvent({
+    operation: 'delegate_session',
+    phase: 'applied',
+    trigger: 'delegation',
+    title: 'Parallel session spawned',
+    summary: `RemoteLab handed off a focused subtask to ${childName}.`,
+    reason: normalizedTask || `Child session ${childId || childName} is running independently.`,
+    ...(childId ? { targetSessionId: childId } : {}),
+  });
+}
+
+function normalizeSessionTemplateName(value) {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ');
 }
@@ -398,11 +409,6 @@ function normalizeSessionVisitorName(value) {
 function normalizeSessionUserName(value) {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ');
-}
-
-function isTemplateAppScopeId(appId) {
-  const normalized = normalizeAppId(appId);
-  return /^app[_-]/i.test(normalized);
 }
 
 function formatSessionSourceNameFromId(sourceId) {
@@ -431,19 +437,12 @@ function resolveSessionSourceName(meta, sourceId = resolveSessionSourceId(meta))
 
 function hasRequestedSessionSourceHint(extra = {}) {
   const explicitSourceId = normalizeAppId(extra?.sourceId);
-  if (explicitSourceId) return true;
-  const requestedAppId = normalizeAppId(extra?.appId);
-  return !!(requestedAppId && !isTemplateAppScopeId(requestedAppId));
+  return !!explicitSourceId;
 }
 
 function resolveRequestedSessionSourceId(extra = {}) {
   const explicitSourceId = normalizeAppId(extra?.sourceId);
   if (explicitSourceId) return explicitSourceId;
-
-  const requestedAppId = normalizeAppId(extra?.appId);
-  if (requestedAppId && !isTemplateAppScopeId(requestedAppId)) {
-    return requestedAppId;
-  }
 
   return DEFAULT_APP_ID;
 }
@@ -452,16 +451,18 @@ function resolveRequestedSessionSourceName(extra = {}, sourceId = resolveRequest
   const explicitSourceName = normalizeSessionSourceName(extra?.sourceName);
   if (explicitSourceName) return explicitSourceName;
 
-  const requestedAppId = normalizeAppId(extra?.appId);
-  if (requestedAppId && !isTemplateAppScopeId(requestedAppId) && requestedAppId === sourceId) {
-    const requestedAppName = normalizeSessionAppName(extra?.appName);
-    if (requestedAppName) return requestedAppName;
-  }
-
   const builtinSource = getBuiltinApp(sourceId);
   if (builtinSource?.name) return builtinSource.name;
 
   return formatSessionSourceNameFromId(sourceId);
+}
+
+function resolveSessionTemplateId(meta) {
+  return normalizeAppId(meta?.templateId);
+}
+
+function resolveSessionTemplateName(meta) {
+  return normalizeSessionTemplateName(meta?.templateName);
 }
 
 function getFollowUpQueue(meta) {
@@ -1056,12 +1057,12 @@ function shouldExposeSession(meta) {
 function isTaskCardEnabledForSession(meta) {
   if (!meta || isInternalSession(meta)) return false;
   if (normalizeSessionTaskCard(meta.taskCard)) return true;
-  return resolveEffectiveAppId(meta.appId) === WELCOME_APP_ID;
+  return resolveSessionTemplateId(meta) === WELCOME_APP_ID;
 }
 
 function isWelcomeOnboardingActive(meta) {
   if (!meta || isInternalSession(meta)) return false;
-  if (resolveEffectiveAppId(meta.appId) !== WELCOME_APP_ID) return false;
+  if (resolveSessionTemplateId(meta) !== WELCOME_APP_ID) return false;
   return !(typeof meta.welcomeOnboardingRetiredAt === 'string' && meta.welcomeOnboardingRetiredAt.trim());
 }
 
@@ -1071,10 +1072,10 @@ function shouldRetireWelcomeOnboarding(meta) {
   return Number(meta.messageCount || 0) >= 2;
 }
 
-function shouldIncludeSessionAppInstructions(session) {
+function shouldIncludeSessionTemplateInstructions(session) {
   const systemPrompt = typeof session?.systemPrompt === 'string' ? session.systemPrompt.trim() : '';
   if (!systemPrompt) return false;
-  if (resolveEffectiveAppId(session?.appId) !== WELCOME_APP_ID) return true;
+  if (resolveSessionTemplateId(session) !== WELCOME_APP_ID) return true;
   return isWelcomeOnboardingActive(session);
 }
 
@@ -1203,64 +1204,16 @@ function parseRecordTimestamp(record) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isUserMessageEvent(event) {
-  return event?.type === 'message' && event.role === 'user';
-}
-
-function dropActiveRunGeneratedHistoryEvents(history = [], activeRunId = '') {
-  if (!activeRunId) return Array.isArray(history) ? history : [];
-  return (Array.isArray(history) ? history : []).filter((event) => {
-    if (event?.runId !== activeRunId) return true;
-    return isUserMessageEvent(event);
-  });
-}
-
-function withSyntheticSeqs(events = [], baseSeq = 0) {
-  let nextSeq = Number.isInteger(baseSeq) && baseSeq > 0 ? baseSeq : 0;
-  return (Array.isArray(events) ? events : []).map((event) => {
-    nextSeq += 1;
-    return {
-      ...event,
-      seq: nextSeq,
-    };
-  });
-}
-
-async function collectNormalizedRunEvents(run, manifest) {
-  const runtimeInvocation = await createToolInvocation(manifest.tool, '', {
+async function createRunRuntimeInvocation(manifest) {
+  return createToolInvocation(manifest.tool, '', {
     model: manifest.options?.model,
     effort: manifest.options?.effort,
     thinking: manifest.options?.thinking,
   });
-  const { adapter } = runtimeInvocation;
-  const spoolRecords = await readRunSpoolRecords(run.id);
-  const normalizedEvents = [];
-  let stdoutLineCount = 0;
-  let lastRecordTimestamp = null;
+}
 
-  for (const record of spoolRecords) {
-    if (record?.stream !== 'stdout') continue;
-    const line = await materializeRunSpoolLine(run.id, record);
-    if (!line) continue;
-    stdoutLineCount += 1;
-    const stableTimestamp = parseRecordTimestamp(record);
-    if (Number.isInteger(stableTimestamp)) {
-      lastRecordTimestamp = stableTimestamp;
-    }
-    const parsedEvents = adapter.parseLine(line).map((event) => ({
-      ...event,
-      ...(Number.isInteger(stableTimestamp) ? { timestamp: stableTimestamp } : {}),
-    }));
-    normalizedEvents.push(...normalizeRunEvents(run, parsedEvents));
-  }
-
-  const flushedEvents = adapter.flush().map((event) => ({
-    ...event,
-    ...(Number.isInteger(lastRecordTimestamp) ? { timestamp: lastRecordTimestamp } : {}),
-  }));
-  normalizedEvents.push(...normalizeRunEvents(run, flushedEvents));
-
-  const preview = spoolRecords
+function buildRunProjectionPreview(spoolRecords = []) {
+  return (spoolRecords || [])
     .filter((record) => ['stdout', 'stderr', 'error'].includes(record.stream))
     .map((record) => {
       if (record?.json && typeof record.json === 'object') {
@@ -1273,48 +1226,79 @@ async function collectNormalizedRunEvents(run, manifest) {
     .filter(Boolean)
     .slice(-3)
     .join(' | ');
+}
+
+async function normalizeRunSpoolRecords(run, runtimeInvocation, spoolRecords = [], options = {}) {
+  const { adapter } = runtimeInvocation;
+  const normalizedEvents = [];
+  let lastRecordTimestamp = null;
+
+  for (const record of spoolRecords) {
+    if (record?.stream !== 'stdout') continue;
+    const line = await materializeRunSpoolLine(run.id, record);
+    if (!line) continue;
+    const stableTimestamp = parseRecordTimestamp(record);
+    if (Number.isInteger(stableTimestamp)) {
+      lastRecordTimestamp = stableTimestamp;
+    }
+    const parsedEvents = adapter.parseLine(line).map((event) => ({
+      ...event,
+      ...(Number.isInteger(stableTimestamp) ? { timestamp: stableTimestamp } : {}),
+    }));
+    normalizedEvents.push(...normalizeRunEvents(run, parsedEvents));
+  }
+
+  if (options.flush !== false) {
+    const flushedEvents = adapter.flush().map((event) => ({
+      ...event,
+      ...(Number.isInteger(lastRecordTimestamp) ? { timestamp: lastRecordTimestamp } : {}),
+    }));
+    normalizedEvents.push(...normalizeRunEvents(run, flushedEvents));
+  }
 
   return {
-    runtimeInvocation,
     normalizedEvents,
-    stdoutLineCount,
-    preview,
+    preview: buildRunProjectionPreview(spoolRecords),
+  };
+}
+
+async function collectNormalizedRunEvents(run, manifest) {
+  const runtimeInvocation = await createRunRuntimeInvocation(manifest);
+  const spoolRecords = await readRunSpoolRecords(run.id);
+  const parsed = await normalizeRunSpoolRecords(run, runtimeInvocation, spoolRecords);
+  return {
+    runtimeInvocation,
+    ...parsed,
+  };
+}
+
+async function collectNormalizedRunEventDelta(run, manifest) {
+  const runtimeInvocation = await createRunRuntimeInvocation(manifest);
+  const delta = await readRunSpoolDelta(run.id, {
+    startOffset: Number.isInteger(run?.normalizedByteOffset) ? run.normalizedByteOffset : 0,
+    skipLines: Number.isInteger(run?.normalizedLineCount) ? run.normalizedLineCount : 0,
+  });
+  const parsed = await normalizeRunSpoolRecords(run, runtimeInvocation, delta.records, { flush: false });
+  return {
+    runtimeInvocation,
+    ...parsed,
+    nextOffset: delta.nextOffset,
+    processedLineCount: delta.processedLineCount,
+    skippedLineCount: delta.skippedLineCount,
   };
 }
 
 async function buildSessionTimelineEvents(sessionId, options = {}) {
-  const includeBodies = options.includeBodies !== false;
-  const history = await loadHistory(sessionId, { includeBodies });
   const sessionMeta = options.sessionMeta || await findSessionMeta(sessionId);
   const activeRunId = typeof sessionMeta?.activeRunId === 'string' ? sessionMeta.activeRunId.trim() : '';
-  if (!activeRunId) {
-    return history;
+  const pendingReplySelfCheckRunId = typeof liveSessions.get(sessionId)?.pendingReplySelfCheckRunId === 'string'
+    ? liveSessions.get(sessionId).pendingReplySelfCheckRunId.trim()
+    : '';
+  const syncRunId = activeRunId || pendingReplySelfCheckRunId;
+  if (syncRunId) {
+    await syncDetachedRun(sessionId, syncRunId);
   }
-
-  const run = await getRun(activeRunId);
-  if (!run || run.finalizedAt) {
-    return history;
-  }
-
-  const manifest = await getRunManifest(activeRunId);
-  if (!manifest) {
-    return history;
-  }
-
-  const projected = await collectNormalizedRunEvents(run, manifest);
-  if (projected.normalizedEvents.length === 0) {
-    return dropActiveRunGeneratedHistoryEvents(history, activeRunId);
-  }
-
-  const committedLatestSeq = history.reduce(
-    (maxSeq, event) => (Number.isInteger(event?.seq) && event.seq > maxSeq ? event.seq : maxSeq),
-    0,
-  );
-
-  return [
-    ...dropActiveRunGeneratedHistoryEvents(history, activeRunId),
-    ...withSyntheticSeqs(projected.normalizedEvents, committedLatestSeq),
-  ];
+  return loadHistory(sessionId, { includeBodies: options.includeBodies !== false });
 }
 
 async function syncDetachedRunUnlocked(sessionId, runId) {
@@ -1329,8 +1313,20 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   let historyChanged = false;
   let sessionChanged = false;
 
-  const projection = await collectNormalizedRunEvents(run, manifest);
+  const projection = await collectNormalizedRunEventDelta(run, manifest);
   const normalizedEvents = projection.normalizedEvents;
+  if (normalizedEvents.length > 0) {
+    await appendEvents(sessionId, normalizedEvents);
+    historyChanged = true;
+  }
+
+  const currentNormalizedLineCount = Number.isInteger(run.normalizedLineCount) ? run.normalizedLineCount : 0;
+  const currentNormalizedEventCount = Number.isInteger(run.normalizedEventCount) ? run.normalizedEventCount : 0;
+  const archivedLineBase = projection.skippedLineCount > 0
+    ? projection.skippedLineCount
+    : currentNormalizedLineCount;
+  const nextNormalizedLineCount = archivedLineBase + projection.processedLineCount;
+  const nextNormalizedEventCount = currentNormalizedEventCount + normalizedEvents.length;
   const latestUsage = [...normalizedEvents].reverse().find((event) => event.type === 'usage');
   const contextInputTokens = Number.isInteger(latestUsage?.contextTokens)
     ? latestUsage.contextTokens
@@ -1341,8 +1337,9 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
 
   run = await updateRun(runId, (current) => ({
     ...current,
-    normalizedLineCount: projection.stdoutLineCount,
-    normalizedEventCount: normalizedEvents.length,
+    normalizedLineCount: nextNormalizedLineCount,
+    normalizedByteOffset: projection.nextOffset,
+    normalizedEventCount: nextNormalizedEventCount,
     lastNormalizedAt: nowIso(),
     ...(Number.isInteger(contextInputTokens) ? { contextInputTokens } : {}),
     ...(Number.isInteger(contextWindowTokens) ? { contextWindowTokens } : {}),
@@ -1365,12 +1362,44 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   const completedAt = typeof result?.completedAt === 'string' && result.completedAt
     ? result.completedAt
     : null;
+  const needsTerminalProjection = !run.finalizedAt && (
+    isTerminalRunState(run.state)
+    || (!!inferredState && !!completedAt)
+  );
+  const terminalProjection = needsTerminalProjection
+    ? await collectNormalizedRunEvents(run, manifest)
+    : null;
+  const terminalNormalizedEventCount = terminalProjection?.normalizedEvents?.length || nextNormalizedEventCount;
+  const terminalTailEvents = terminalProjection && terminalProjection.normalizedEvents.length > nextNormalizedEventCount
+    ? terminalProjection.normalizedEvents.slice(nextNormalizedEventCount)
+    : [];
+  const terminalLatestUsage = terminalProjection?.normalizedEvents?.length > 0
+    ? [...terminalProjection.normalizedEvents].reverse().find((event) => event.type === 'usage')
+    : null;
+  const terminalContextInputTokens = Number.isInteger(terminalLatestUsage?.contextTokens)
+    ? terminalLatestUsage.contextTokens
+    : contextInputTokens;
+  const terminalContextWindowTokens = Number.isInteger(terminalLatestUsage?.contextWindowTokens)
+    ? terminalLatestUsage.contextWindowTokens
+    : contextWindowTokens;
+
+  if (terminalTailEvents.length > 0) {
+    await appendEvents(sessionId, terminalTailEvents);
+    historyChanged = true;
+    run = await updateRun(runId, (current) => ({
+      ...current,
+      normalizedEventCount: terminalNormalizedEventCount,
+      lastNormalizedAt: nowIso(),
+      ...(Number.isInteger(terminalContextInputTokens) ? { contextInputTokens: terminalContextInputTokens } : {}),
+      ...(Number.isInteger(terminalContextWindowTokens) ? { contextWindowTokens: terminalContextWindowTokens } : {}),
+    })) || run;
+  }
   const zeroStructuredOutputReason = (
     isStructuredRuntime
     && inferredState === 'completed'
-    && normalizedEvents.length === 0
+    && terminalNormalizedEventCount === 0
   )
-    ? await deriveStructuredRuntimeFailureReason(runId, projection.preview)
+    ? await deriveStructuredRuntimeFailureReason(runId, terminalProjection?.preview || projection.preview)
     : null;
 
   if (zeroStructuredOutputReason) {
@@ -1398,7 +1427,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   }
 
   if (isTerminalRunState(run.state) && !run.finalizedAt) {
-    const finalized = await finalizeDetachedRun(sessionId, run, manifest, normalizedEvents);
+    const finalized = await finalizeDetachedRun(sessionId, run, manifest, terminalProjection?.normalizedEvents || []);
     historyChanged = historyChanged || finalized.historyChanged;
     sessionChanged = sessionChanged || finalized.sessionChanged;
     run = await getRun(runId) || run;
@@ -1514,41 +1543,79 @@ async function touchSessionMeta(sessionId, extra = {}) {
   })).meta;
 }
 
-function queueSessionCompletionTargets(session, run, manifest) {
-  if (!session?.id || !run?.id) return false;
-  if (manifest?.internalOperation && !isReplySelfRepairOperation(manifest)) return false;
-  const targets = sanitizeEmailCompletionTargets(session.completionTargets || []);
-  if (targets.length === 0) return false;
-  dispatchSessionEmailCompletionTargets({
-    ...session,
-    completionTargets: targets,
-  }, run).catch((error) => {
-    console.error(`[agent-mail-completion-targets] ${session.id}/${run.id}: ${error.message}`);
-  });
-  return true;
-}
-
-async function maybeSendSessionCompletionPush(sessionId, fallbackSession = null) {
-  const currentSession = await getSession(sessionId) || fallbackSession;
-  if (!currentSession?.id) return false;
-  if (isSessionRunning(currentSession)) return false;
-  if (getSessionQueueCount(currentSession) > 0) return false;
-  if (hasPendingReplySelfCheck(sessionId)) return false;
-  sendCompletionPush({ ...currentSession, id: sessionId }).catch(() => {});
-  return true;
-}
-
-async function resumePendingCompletionTargets() {
-  for (const runId of await listRunIds()) {
-    const run = await getRun(runId);
-    if (!run || !isTerminalRunState(run.state)) continue;
-    const session = await getSession(run.sessionId);
-    if (!session?.completionTargets?.length) continue;
-    const manifest = await getRunManifest(runId);
-    if (manifest?.internalOperation && !isReplySelfRepairOperation(manifest)) continue;
-    queueSessionCompletionTargets(session, run, manifest);
-  }
-}
+const {
+  applyGeneratedSessionGrouping,
+  maybePublishRunResultAssets,
+  maybeRunReplySelfCheck,
+  maybeSendSessionCompletionPush,
+  prepareReplySelfCheck,
+  queueSessionCompletionTargets,
+  resumePendingCompletionTargets,
+  runSessionTurnCompletionEffects,
+  scheduleSessionWorkflowStateSuggestion,
+} = createSessionTurnCompletionHelpers({
+  REPLY_SELF_CHECK_ACCEPT_STATUS,
+  REPLY_SELF_CHECK_DEFAULT_REASON,
+  REPLY_SELF_CHECK_REVIEWING_STATUS,
+  REPLY_SELF_REPAIR_INTERNAL_OPERATION,
+  allowsSessionTurnCompletionEffects,
+  appendAssistantMessage,
+  appendEvent,
+  broadcastSessionInvalidation,
+  buildReplySelfCheckPrompt,
+  buildReplySelfRepairPrompt,
+  buildResultAssetReadyMessage,
+  clearPendingReplySelfCheck,
+  clearRenameState,
+  collectGeneratedResultFilesFromRun,
+  contextOperationEvent,
+  dispatchSessionEmailCompletionTargets,
+  findAssistantAttachmentMessageForRun,
+  findResultAssetMessageForRun,
+  getCompactionServices,
+  getRun,
+  getRunManifest,
+  getSession,
+  getSessionQueueCount,
+  getTaskCardFollowupServices,
+  getToolDefinitionAsync,
+  hasPendingReplySelfCheck,
+  isInternalSession,
+  isReplySelfRepairOperation,
+  isSessionAutoRenamePending,
+  isSessionRunning,
+  isTerminalRunState,
+  listRunIds,
+  loadHistory,
+  loadReplySelfCheckTurnContext,
+  markPendingReplySelfCheck,
+  maybeApplyAssistantTaskCard,
+  maybeAutoCompact,
+  normalizeAttachmentSizeBytes,
+  normalizePublishedResultAssetAttachments,
+  normalizeSessionDescription,
+  normalizeSessionGroup,
+  normalizeSessionWorkflowPriority,
+  normalizeSessionWorkflowState,
+  nowIso,
+  parseReplySelfCheckDecision,
+  publishLocalFileAssetFromPath,
+  renameSession,
+  runDetachedAssistantPrompt,
+  sanitizeEmailCompletionTargets,
+  scheduleQueuedFollowUpDispatch,
+  scheduleSessionTaskCardSuggestion,
+  sendCompletionPush,
+  sendMessage,
+  setRenameState,
+  statusEvent,
+  summarizeReplySelfCheckReason,
+  triggerSessionLabelSuggestion,
+  triggerSessionWorkflowStateSuggestion,
+  updateRun,
+  updateSessionGrouping,
+  updateSessionWorkflowClassification,
+});
 
 async function persistResumeIds(sessionId, claudeSessionId, codexThreadId) {
   return (await mutateSessionMeta(sessionId, (session) => {
@@ -1608,14 +1675,31 @@ async function enrichSessionMeta(meta, _options = {}) {
   const snapshot = await getHistorySnapshot(meta.id);
   const queuedCount = getFollowUpQueueCount(meta);
   const runActivity = await resolveSessionRunActivity(meta);
-  const { followUpQueue, recentFollowUpRequestIds, activeRunId, activeRun, ...rest } = meta;
+  const { managerState, workState } = buildSessionControlState(meta);
+  const {
+    followUpQueue,
+    recentFollowUpRequestIds,
+    activeRunId,
+    activeRun,
+    appId,
+    appName,
+    templateAppId,
+    templateAppName,
+    managerState: _managerState,
+    workState: _workState,
+    ...rest
+  } = meta;
   const sourceId = resolveSessionSourceId(meta);
+  const sourceName = resolveSessionSourceName(meta, sourceId);
+  const templateId = resolveSessionTemplateId(meta);
+  const templateName = resolveSessionTemplateName(meta);
   return {
     ...rest,
-    appId: resolveEffectiveAppId(meta.appId),
     entryMode: resolveSessionEntryMode(meta.entryMode),
     sourceId,
-    sourceName: resolveSessionSourceName(meta, sourceId),
+    sourceName,
+    ...(templateId ? { templateId } : {}),
+    ...(templateName ? { templateName } : {}),
     latestSeq: snapshot.latestSeq,
     lastEventAt: snapshot.lastEventAt,
     lastAssistantMessageAt: snapshot.lastAssistantMessageAt,
@@ -1625,6 +1709,8 @@ async function enrichSessionMeta(meta, _options = {}) {
     activeFromSeq: snapshot.activeFromSeq,
     compactedThroughSeq: snapshot.compactedThroughSeq,
     contextTokenEstimate: snapshot.contextTokenEstimate,
+    managerState,
+    workState,
     activity: buildSessionActivity(meta, live, {
       runState: runActivity.state,
       run: runActivity.run,
@@ -1722,31 +1808,6 @@ function broadcastSessionInvalidation(sessionId) {
     return false;
   });
   sendToClients(clients, { type: 'session_invalidated', sessionId });
-}
-
-function buildPreparedContinuationContext(prepared, previousTool, effectiveTool) {
-  if (!prepared) return '';
-
-  const summary = typeof prepared.summary === 'string' ? prepared.summary.trim() : '';
-  const continuationBody = typeof prepared.continuationBody === 'string'
-    ? prepared.continuationBody.trim()
-    : '';
-  const continuation = continuationBody
-    ? buildSessionContinuationContextFromBody(continuationBody, {
-        fromTool: previousTool,
-        toTool: effectiveTool,
-      })
-    : '';
-
-  if (!summary) {
-    return continuation;
-  }
-
-  let full = `[Conversation summary]\n\n${summary}`;
-  if (continuation) {
-    full = `${full}\n\n---\n\n${continuation}`;
-  }
-  return full;
 }
 
 function buildSavedTemplateContextContent(prepared) {
@@ -1911,129 +1972,6 @@ async function getOrPrepareForkContext(sessionId, snapshot, contextHead) {
   return null;
 }
 
-function normalizeReplySelfCheckSetting(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return 'all';
-  if (['0', 'false', 'off', 'disabled', 'disable', 'none'].includes(normalized)) {
-    return 'off';
-  }
-  if (['1', 'true', 'on', 'enabled', 'enable', 'all'].includes(normalized)) {
-    return 'all';
-  }
-  return normalized;
-}
-
-async function shouldRunReplySelfCheck(session, run, manifest) {
-  if (!session?.id || !run?.id) return false;
-  if (manifest?.internalOperation) return false;
-  if (session.archived || isInternalSession(session)) return false;
-  if (run.state !== 'completed') return false;
-  const setting = normalizeReplySelfCheckSetting(process.env.REMOTELAB_REPLY_SELF_CHECK);
-  if (setting === 'off') return false;
-  if (setting === 'all') return true;
-  const toolDefinition = await getToolDefinitionAsync(run.tool || session.tool || '');
-  if (!toolDefinition) return false;
-  if (setting === 'micro-agent') {
-    return toolDefinition.id === 'micro-agent' || toolDefinition.toolProfile === 'micro-agent';
-  }
-  const enabledTools = new Set(setting.split(',').map((entry) => entry.trim()).filter(Boolean));
-  return enabledTools.has(toolDefinition.id || '') || enabledTools.has(toolDefinition.toolProfile || '');
-}
-
-async function prepareReplySelfCheck(sessionId, session, run, manifest) {
-  if (!await shouldRunReplySelfCheck(session, run, manifest)) {
-    return null;
-  }
-  const latestSession = await getSession(sessionId);
-  if (!latestSession || latestSession.activeRunId || getSessionQueueCount(latestSession) > 0) {
-    return null;
-  }
-
-  const { userMessage, assistantTurnText } = await loadReplySelfCheckTurnContext(sessionId, run.id, {
-    loadSessionHistory: loadHistory,
-  });
-  if (!assistantTurnText) {
-    return null;
-  }
-
-  markPendingReplySelfCheck(sessionId, run.id);
-  await appendEvent(sessionId, statusEvent(REPLY_SELF_CHECK_REVIEWING_STATUS));
-  broadcastSessionInvalidation(sessionId);
-
-  return {
-    session: latestSession,
-    userMessage,
-    assistantTurnText,
-  };
-}
-
-async function maybeRunReplySelfCheck(sessionId, session, run, manifest, preparedCheck = null) {
-  if (!preparedCheck) {
-    return { attempted: false, continued: false };
-  }
-
-  const { userMessage, assistantTurnText } = preparedCheck;
-  const effectiveSession = preparedCheck.session || session;
-
-  let reviewText = '';
-  try {
-    reviewText = await runDetachedAssistantPrompt({
-      id: sessionId,
-      folder: effectiveSession.folder,
-      tool: run.tool || effectiveSession.tool,
-      model: run.model || undefined,
-      effort: run.effort || undefined,
-      thinking: false,
-    }, buildReplySelfCheckPrompt({ userMessage, assistantTurnText }));
-  } catch (error) {
-    await appendEvent(sessionId, statusEvent(`Assistant self-check: review failed — ${summarizeReplySelfCheckReason(error.message, 'background reviewer error')}`));
-    clearPendingReplySelfCheck(sessionId, { broadcast: true });
-    return { attempted: true, continued: false };
-  }
-
-  const reviewDecision = parseReplySelfCheckDecision(reviewText);
-  const refreshed = await getSession(sessionId);
-  if (!refreshed || refreshed.activeRunId || getSessionQueueCount(refreshed) > 0) {
-    await appendEvent(sessionId, statusEvent('Assistant self-check: skipped automatic continuation because new work arrived first.'));
-    clearPendingReplySelfCheck(sessionId, { broadcast: true });
-    return { attempted: true, continued: false };
-  }
-
-  if (reviewDecision.action !== 'continue') {
-    await appendEvent(sessionId, statusEvent(REPLY_SELF_CHECK_ACCEPT_STATUS));
-    clearPendingReplySelfCheck(sessionId, { broadcast: true });
-    return { attempted: true, continued: false };
-  }
-
-  const reason = summarizeReplySelfCheckReason(reviewDecision.reason, REPLY_SELF_CHECK_DEFAULT_REASON);
-  await appendEvent(sessionId, statusEvent(`Assistant self-check: continuing automatically — ${reason}`));
-  broadcastSessionInvalidation(sessionId);
-
-  try {
-    await sendMessage(sessionId, buildReplySelfRepairPrompt({
-      userMessage,
-      assistantTurnText,
-      reviewDecision,
-    }), [], {
-      tool: run.tool || session.tool,
-      model: run.model || undefined,
-      effort: run.effort || undefined,
-      thinking: !!run.thinking,
-      recordUserMessage: false,
-      queueIfBusy: false,
-      internalOperation: REPLY_SELF_REPAIR_INTERNAL_OPERATION,
-    });
-  } catch (error) {
-    await appendEvent(sessionId, statusEvent(`Assistant self-check: failed to continue automatically — ${summarizeReplySelfCheckReason(error.message, 'unable to launch follow-up reply')}`));
-    clearPendingReplySelfCheck(sessionId, { broadcast: true });
-    return { attempted: true, continued: false };
-  }
-
-  clearPendingReplySelfCheck(sessionId);
-  return { attempted: true, continued: true };
-}
-
-
 async function findResultAssetMessageForRun(sessionId, runId) {
   const events = await loadHistory(sessionId, { includeBodies: false });
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -2058,97 +1996,8 @@ async function findAssistantAttachmentMessageForRun(sessionId, runId) {
   return null;
 }
 
-async function maybePublishRunResultAssets(sessionId, run, manifest, normalizedEvents) {
-  if (manifest?.internalOperation) {
-    return false;
-  }
-  if (await findAssistantAttachmentMessageForRun(sessionId, run.id)) {
-    return false;
-  }
-
-  let attachments = normalizePublishedResultAssetAttachments(run?.publishedResultAssets || []);
-  if (attachments.length === 0) {
-    const generatedFiles = await collectGeneratedResultFilesFromRun(run, manifest, normalizedEvents);
-    if (generatedFiles.length === 0) {
-      return false;
-    }
-
-    const publishedAssets = [];
-    for (const file of generatedFiles) {
-      try {
-        const published = await publishLocalFileAssetFromPath({
-          sessionId,
-          localPath: file.localPath,
-          originalName: file.originalName,
-          mimeType: file.mimeType,
-          createdBy: 'assistant',
-        });
-        publishedAssets.push({
-          assetId: published.id,
-          originalName: published.originalName || file.originalName,
-          mimeType: published.mimeType || file.mimeType,
-          ...(normalizeAttachmentSizeBytes(published.sizeBytes) ? { sizeBytes: normalizeAttachmentSizeBytes(published.sizeBytes) } : {}),
-        });
-      } catch (error) {
-        console.error(`[result-file-assets] Failed to publish ${file.localPath}: ${error?.message || error}`);
-      }
-    }
-
-    if (publishedAssets.length === 0) {
-      return false;
-    }
-
-    const updatedRun = await updateRun(run.id, (current) => ({
-      ...current,
-      publishedResultAssets: Array.isArray(current.publishedResultAssets) && current.publishedResultAssets.length > 0
-        ? current.publishedResultAssets
-        : publishedAssets,
-      publishedResultAssetsAt: current.publishedResultAssetsAt || nowIso(),
-    })) || run;
-    attachments = normalizePublishedResultAssetAttachments(updatedRun.publishedResultAssets || publishedAssets);
-  }
-
-  if (attachments.length === 0) {
-    return false;
-  }
-  if (await findResultAssetMessageForRun(sessionId, run.id)) {
-    return false;
-  }
-
-  await appendAssistantMessage(sessionId, buildResultAssetReadyMessage(attachments), [], {
-    preSavedAttachments: attachments,
-    source: 'result_file_assets',
-    resultRunId: run.id,
-    ...(run.requestId ? { requestId: run.requestId } : {}),
-  });
-  return true;
-}
-
-const MANAGER_TURN_POLICY_BLOCK = `Manager note: ${MANAGER_TURN_POLICY_REMINDER}`;
-
-async function buildManagerTurnContextText(session, text = '') {
-  const promptContext = session && !isInternalSession(session)
-    ? await loadExecutionMemoryPromptContext(session, text)
-    : { scopeRouter: '', relatedSessions: '' };
-  const scopeRouter = promptContext.scopeRouter || '';
-  const relatedSessions = promptContext.relatedSessions || '';
-  const memorySearchPolicy = scopeRouter
-    ? [
-      'Memory/search policy for this turn:',
-      '- Prefer carried context, matched scope-router hints, and imported related-session memory before filesystem discovery.',
-      '- Reuse the best-matching summary, task card, or referenced memory/doc packet before broad search.',
-      '- Use machine-wide search only after targeted context misses.',
-    ].join('\n')
-    : 'Memory/search policy for this turn: prefer targeted memory, referenced docs, or known project pointers before broad filesystem search. Use machine-wide search only as a last resort.';
-  return [
-    MANAGER_TURN_POLICY_BLOCK,
-    buildTurnRoutingHint(text),
-    buildSessionAgreementsPromptBlock(session?.activeAgreements || []),
-    buildTaskCardPromptBlock(session?.taskCard),
-    scopeRouter,
-    relatedSessions,
-    memorySearchPolicy,
-  ].filter(Boolean).join('\n\n');
+async function buildManagerTurnContextText(session, _text = '') {
+  return buildTurnContextHook(session);
 }
 
 function resolveResumeState(toolId, session, options = {}) {
@@ -2200,23 +2049,19 @@ export async function buildPrompt(sessionId, session, text, previousTool, effect
   const flattenPrompt = toolDefinition?.flattenPrompt === true;
   const { hasResume } = resolveResumeState(effectiveTool, session, options);
   let continuationContext = '';
-  let contextToolIndex = '';
 
   if (!hasResume && options.skipSessionContinuation !== true) {
     const contextHead = await getContextHead(sessionId);
-    contextToolIndex = typeof contextHead?.toolIndex === 'string' ? contextHead.toolIndex.trim() : '';
     const prepared = await getOrPrepareForkContext(
       sessionId,
       snapshot || await getHistorySnapshot(sessionId),
       contextHead,
     );
-    continuationContext = buildPreparedContinuationContext(prepared, previousTool, effectiveTool);
-  }
-
-  if (contextToolIndex) {
-    continuationContext = continuationContext
-      ? `${continuationContext}\n\n---\n\n[Earlier tool activity index]\n\n${contextToolIndex}`
-      : `[Earlier tool activity index]\n\n${contextToolIndex}`;
+    const workState = buildSessionWorkState(session, {
+      contextHead,
+      forkContext: prepared,
+    });
+    continuationContext = buildPreparedContinuationPromptFromWorkState(workState, previousTool, effectiveTool);
   }
 
   let actualText = text;
@@ -2227,11 +2072,9 @@ export async function buildPrompt(sessionId, session, text, previousTool, effect
 
     if (continuationContext) {
       turnSections.push(continuationContext);
-      turnSections.push(TURN_ACTIVATION_CARD);
       if (turnPrefix) turnSections.push(turnPrefix);
       turnSections.push(`Current user message:\n${text}`);
     } else {
-      turnSections.push(TURN_ACTIVATION_CARD);
       if (turnPrefix) turnSections.push(turnPrefix);
       turnSections.push(`${hasResume ? 'Current user message' : 'User message'}:\n${text}`);
     }
@@ -2245,8 +2088,8 @@ export async function buildPrompt(sessionId, session, text, previousTool, effect
       if (sourceRuntimePrompt) {
         preamble += `\n\n---\n\nSource/runtime instructions (backend-owned for this session source):\n${sourceRuntimePrompt}`;
       }
-      if (shouldIncludeSessionAppInstructions(session)) {
-        preamble += `\n\n---\n\nApp instructions (follow these for this session):\n${session.systemPrompt}`;
+      if (shouldIncludeSessionTemplateInstructions(session)) {
+        preamble += `\n\n---\n\nTemplate instructions (follow these for this session):\n${session.systemPrompt}`;
       }
       actualText = `${preamble}\n\n---\n\n${actualText}`;
     }
@@ -2271,152 +2114,6 @@ function normalizeRunEvents(run, events) {
     runId: run.id,
     ...(run.requestId ? { requestId: run.requestId } : {}),
   }));
-}
-
-async function applyGeneratedSessionGrouping(sessionId, summaryResult) {
-  const summary = summaryResult?.summary;
-  if (!summary) return getSession(sessionId);
-  const current = await getSession(sessionId);
-  if (!current) return null;
-
-  const nextGroup = summary.group === undefined
-    ? (current.group || '')
-    : normalizeSessionGroup(summary.group || '');
-  const nextDescription = summary.description === undefined
-    ? (current.description || '')
-    : normalizeSessionDescription(summary.description || '');
-
-  if ((nextGroup || '') === (current.group || '') && (nextDescription || '') === (current.description || '')) {
-    return current;
-  }
-
-  return updateSessionGrouping(sessionId, {
-    group: nextGroup,
-    description: nextDescription,
-  });
-}
-
-function scheduleSessionWorkflowStateSuggestion(session, run) {
-  if (!session?.id || !run || session.archived || isInternalSession(session)) {
-    return false;
-  }
-
-  const suggestionDone = triggerSessionWorkflowStateSuggestion({
-    id: session.id,
-    folder: session.folder,
-    name: session.name || '',
-    group: session.group || '',
-    description: session.description || '',
-    workflowState: session.workflowState || '',
-    workflowPriority: session.workflowPriority || '',
-    tool: run.tool || session.tool,
-    model: run.model || undefined,
-    thinking: false,
-    runState: run.state,
-    queuedCount: getSessionQueueCount(session),
-  });
-
-  suggestionDone.then(async (result) => {
-    const nextWorkflowState = normalizeSessionWorkflowState(result?.workflowState || '');
-    const nextWorkflowPriority = normalizeSessionWorkflowPriority(result?.workflowPriority || '');
-    if (!nextWorkflowState && !nextWorkflowPriority) return;
-    await updateSessionWorkflowClassification(session.id, {
-      workflowState: nextWorkflowState,
-      workflowPriority: nextWorkflowPriority,
-    });
-  }).catch((error) => {
-    console.error(`[workflow-state] Failed to update workflow state for ${session.id?.slice(0, 8)}: ${error.message}`);
-  });
-
-  return true;
-}
-
-async function runSessionTurnCompletionEffects(sessionId, latestSession, finalizedRun, manifest) {
-  let session = latestSession;
-  let sessionChanged = false;
-  const allowCompletionEffects = allowsSessionTurnCompletionEffects(manifest);
-
-  if (allowCompletionEffects) {
-    const taskCardSession = await maybeApplyAssistantTaskCard(sessionId, finalizedRun.id, session, getTaskCardFollowupServices());
-    if (taskCardSession) {
-      session = taskCardSession;
-      sessionChanged = true;
-    } else {
-      scheduleSessionTaskCardSuggestion(session, finalizedRun, getTaskCardFollowupServices());
-    }
-  }
-
-  const hasQueuedFollowUps = getSessionQueueCount(session) > 0;
-  if (hasQueuedFollowUps) {
-    scheduleQueuedFollowUpDispatch(sessionId);
-  }
-
-  if (allowCompletionEffects && !hasQueuedFollowUps) {
-    queueSessionCompletionTargets(session, finalizedRun, manifest);
-    scheduleSessionWorkflowStateSuggestion(session, finalizedRun);
-  }
-
-  const needsRename = isSessionAutoRenamePending(session);
-  const needsGrouping = !session.group || !session.description;
-
-  if (needsRename || needsGrouping) {
-    if (needsRename) {
-      setRenameState(sessionId, 'pending');
-    }
-
-    const labelSuggestionDone = triggerSessionLabelSuggestion(
-      {
-        id: sessionId,
-        folder: session.folder,
-        name: session.name || '',
-        group: session.group || '',
-        description: session.description || '',
-        sourceName: session.sourceName || '',
-        autoRenamePending: session.autoRenamePending,
-        tool: finalizedRun.tool || session.tool,
-        model: finalizedRun.model || undefined,
-        effort: finalizedRun.effort || undefined,
-        thinking: !!finalizedRun.thinking,
-      },
-      async (newName) => {
-        const currentSession = await getSession(sessionId);
-        if (!isSessionAutoRenamePending(currentSession)) return null;
-        return renameSession(sessionId, newName);
-      },
-    );
-
-    if (needsRename) {
-      labelSuggestionDone.then(async (labelResult) => {
-        const grouped = await applyGeneratedSessionGrouping(sessionId, labelResult);
-        const updated = grouped || await getSession(sessionId);
-        const stillPendingRename = !!updated && isSessionAutoRenamePending(updated);
-        if (stillPendingRename) {
-          setRenameState(
-            sessionId,
-            'failed',
-            labelResult?.rename?.error || labelResult?.error || 'No title generated',
-          );
-        } else {
-          clearRenameState(sessionId, { broadcast: true });
-        }
-        if (allowCompletionEffects && !hasQueuedFollowUps) {
-          await maybeSendSessionCompletionPush(sessionId, updated || session);
-        }
-      });
-      return { session, sessionChanged };
-    }
-
-    labelSuggestionDone.then(async (labelResult) => {
-      await applyGeneratedSessionGrouping(sessionId, labelResult);
-    });
-  }
-
-  if (allowCompletionEffects && !hasQueuedFollowUps) {
-    void maybeAutoCompact(sessionId, session, finalizedRun, manifest, getCompactionServices());
-    void maybeSendSessionCompletionPush(sessionId, session);
-  }
-
-  return { session, sessionChanged };
 }
 
 function launchEarlySessionLabelSuggestion(sessionId, sessionMeta) {
@@ -2466,7 +2163,7 @@ function launchEarlySessionLabelSuggestion(sessionId, sessionMeta) {
 }
 
 
-async function finalizeDetachedRun(sessionId, run, manifest, normalizedEvents = []) {
+async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvents = []) {
   let historyChanged = false;
   let sessionChanged = false;
   const live = liveSessions.get(sessionId);
@@ -2476,11 +2173,6 @@ async function finalizeDetachedRun(sessionId, run, manifest, normalizedEvents = 
   const compactionTargetSessionId = typeof manifest?.compactionTargetSessionId === 'string'
     ? manifest.compactionTargetSessionId
     : '';
-
-  if (Array.isArray(normalizedEvents) && normalizedEvents.length > 0) {
-    await appendEvents(sessionId, normalizedEvents);
-    historyChanged = true;
-  }
 
   if (run.state === 'cancelled') {
     const event = {
@@ -2592,7 +2284,7 @@ async function finalizeDetachedRun(sessionId, run, manifest, normalizedEvents = 
   }
 
   const preparedReplySelfCheck = await prepareReplySelfCheck(sessionId, latestSession, finalizedRun, manifest);
-  historyChanged = await maybePublishRunResultAssets(sessionId, finalizedRun, manifest, normalizedEvents) || historyChanged;
+  historyChanged = await maybePublishRunResultAssets(sessionId, finalizedRun, manifest, fullNormalizedEvents) || historyChanged;
 
   const replySelfCheck = await maybeRunReplySelfCheck(
     sessionId,
@@ -2645,18 +2337,18 @@ export async function startDetachedRunObservers() {
 export async function listSessions({
   includeVisitor = false,
   includeArchived = true,
-  appId = '',
+  templateId = '',
   sourceId = '',
   includeQueuedMessages = false,
 } = {}) {
   const metas = await loadSessionsMeta();
-  const normalizedAppId = normalizeAppId(appId);
+  const normalizedTemplateId = normalizeAppId(templateId);
   const normalizedSourceId = normalizeAppId(sourceId);
   const filtered = metas
     .filter((meta) => includeVisitor || !meta.visitorId)
     .filter((meta) => shouldExposeSession(meta))
     .filter((meta) => includeArchived || !meta.archived)
-    .filter((meta) => !normalizedAppId || resolveEffectiveAppId(meta.appId) === normalizedAppId)
+    .filter((meta) => !normalizedTemplateId || resolveSessionTemplateId(meta) === normalizedTemplateId)
     .filter((meta) => !normalizedSourceId || resolveSessionSourceId(meta) === normalizedSourceId)
     .sort((a, b) => {
       const sidebarOrderA = normalizeSessionSidebarOrder(a?.sidebarOrder);
@@ -2726,8 +2418,8 @@ export async function getRunState(runId) {
 
 export async function createSession(folder, tool, name, extra = {}) {
   const externalTriggerId = typeof extra.externalTriggerId === 'string' ? extra.externalTriggerId.trim() : '';
-  const requestedAppId = normalizeAppId(extra.appId);
-  const requestedAppName = normalizeSessionAppName(extra.appName);
+  const requestedTemplateId = normalizeAppId(extra.templateId);
+  const requestedTemplateName = normalizeSessionTemplateName(extra.templateName);
   const requestedSourceId = resolveRequestedSessionSourceId(extra);
   const requestedSourceName = resolveRequestedSessionSourceName(extra, requestedSourceId);
   const hasRequestedSourceHint = hasRequestedSessionSourceHint(extra);
@@ -2752,7 +2444,6 @@ export async function createSession(folder, tool, name, extra = {}) {
     : [];
   const requestedInitialNaming = resolveInitialSessionName(name, {
     group: requestedGroup,
-    appName: requestedAppName,
     sourceId: hasRequestedSourceHint ? requestedSourceId : '',
     sourceName: hasRequestedSourceHint ? requestedSourceName : '',
     externalTriggerId,
@@ -2777,7 +2468,6 @@ export async function createSession(folder, tool, name, extra = {}) {
 
         const refreshedInitialNaming = resolveInitialSessionName(name, {
           group: requestedGroup || updated.group || '',
-          appName: requestedAppName || updated.appName || '',
           sourceId: hasRequestedSourceHint
             ? requestedSourceId
             : ((updated.sourceId || '') === DEFAULT_APP_ID ? '' : (updated.sourceId || '')),
@@ -2806,11 +2496,6 @@ export async function createSession(folder, tool, name, extra = {}) {
           changed = true;
         }
 
-        if (requestedAppName && updated.appName !== requestedAppName) {
-          updated.appName = requestedAppName;
-          changed = true;
-        }
-
         if (hasRequestedSourceHint && updated.sourceId !== requestedSourceId) {
           updated.sourceId = requestedSourceId;
           changed = true;
@@ -2818,6 +2503,16 @@ export async function createSession(folder, tool, name, extra = {}) {
 
         if (hasRequestedSourceHint && updated.sourceName !== requestedSourceName) {
           updated.sourceName = requestedSourceName;
+          changed = true;
+        }
+
+        if (requestedTemplateId && updated.templateId !== requestedTemplateId) {
+          updated.templateId = requestedTemplateId;
+          changed = true;
+        }
+
+        if (requestedTemplateName && updated.templateName !== requestedTemplateName) {
+          updated.templateName = requestedTemplateName;
           changed = true;
         }
 
@@ -2883,12 +2578,6 @@ export async function createSession(folder, tool, name, extra = {}) {
           }
         }
 
-        const nextAppId = requestedAppId || resolveEffectiveAppId(updated.appId);
-        if (updated.appId !== nextAppId) {
-          updated.appId = nextAppId;
-          changed = true;
-        }
-
         if (changed) {
           updated.updatedAt = nowIso();
           metas[existingIndex] = updated;
@@ -2911,7 +2600,6 @@ export async function createSession(folder, tool, name, extra = {}) {
       id,
       folder,
       tool,
-      appId: resolveEffectiveAppId(extra.appId),
       sourceId: requestedSourceId,
       name: initialNaming.name,
       autoRenamePending: initialNaming.autoRenamePending,
@@ -2923,8 +2611,9 @@ export async function createSession(folder, tool, name, extra = {}) {
     if (requestedDescription) session.description = requestedDescription;
     if (workflowState) session.workflowState = workflowState;
     if (workflowPriority) session.workflowPriority = workflowPriority;
-    if (requestedAppName) session.appName = requestedAppName;
     if (requestedSourceName) session.sourceName = requestedSourceName;
+    if (requestedTemplateId) session.templateId = requestedTemplateId;
+    if (requestedTemplateName) session.templateName = requestedTemplateName;
     if (extra.visitorId) session.visitorId = extra.visitorId;
     if (requestedVisitorName) session.visitorName = requestedVisitorName;
     if (requestedUserId) session.userId = requestedUserId;
@@ -3316,26 +3005,53 @@ async function updateSessionTool(id, tool) {
   return enrichSessionMeta(result.meta);
 }
 
-async function applySessionAppMetadata(id, app, extra = {}) {
+async function applySessionTemplateMetadata(id, template, extra = {}) {
   const result = await mutateSessionMeta(id, (session) => {
     let changed = false;
-    const nextAppId = resolveEffectiveAppId(app?.id);
-    const nextAppName = typeof app?.name === 'string' ? app.name.trim() : '';
-    const nextSystemPrompt = typeof app?.systemPrompt === 'string' ? app.systemPrompt : '';
-    const nextTool = typeof app?.tool === 'string' ? app.tool.trim() : '';
+    const nextTemplateId = normalizeAppId(template?.id);
+    const nextTemplateName = typeof template?.name === 'string' ? template.name.trim() : '';
+    const nextSourceId = nextTemplateId;
+    const nextSourceName = nextTemplateName;
+    const nextSystemPrompt = typeof template?.systemPrompt === 'string' ? template.systemPrompt : '';
+    const nextTool = typeof template?.tool === 'string' ? template.tool.trim() : '';
 
-    if (session.appId !== nextAppId) {
-      session.appId = nextAppId;
+    if (nextSourceId) {
+      if (session.sourceId !== nextSourceId) {
+        session.sourceId = nextSourceId;
+        changed = true;
+      }
+    } else if (session.sourceId) {
+      delete session.sourceId;
       changed = true;
     }
 
-    if (nextAppName) {
-      if (session.appName !== nextAppName) {
-        session.appName = nextAppName;
+    if (nextSourceName) {
+      if (session.sourceName !== nextSourceName) {
+        session.sourceName = nextSourceName;
         changed = true;
       }
-    } else if (session.appName) {
-      delete session.appName;
+    } else if (session.sourceName) {
+      delete session.sourceName;
+      changed = true;
+    }
+
+    if (nextTemplateId) {
+      if (session.templateId !== nextTemplateId) {
+        session.templateId = nextTemplateId;
+        changed = true;
+      }
+    } else if (session.templateId) {
+      delete session.templateId;
+      changed = true;
+    }
+
+    if (nextTemplateName) {
+      if (session.templateName !== nextTemplateName) {
+        session.templateName = nextTemplateName;
+        changed = true;
+      }
+    } else if (session.templateName) {
+      delete session.templateName;
       changed = true;
     }
 
@@ -3352,32 +3068,6 @@ async function applySessionAppMetadata(id, app, extra = {}) {
     if (nextTool && session.tool !== nextTool) {
       session.tool = nextTool;
       changed = true;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(extra, 'templateAppId')) {
-      const templateAppId = typeof extra.templateAppId === 'string' ? extra.templateAppId.trim() : '';
-      if (templateAppId) {
-        if (session.templateAppId !== templateAppId) {
-          session.templateAppId = templateAppId;
-          changed = true;
-        }
-      } else if (session.templateAppId) {
-        delete session.templateAppId;
-        changed = true;
-      }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(extra, 'templateAppName')) {
-      const templateAppName = typeof extra.templateAppName === 'string' ? extra.templateAppName.trim() : '';
-      if (templateAppName) {
-        if (session.templateAppName !== templateAppName) {
-          session.templateAppName = templateAppName;
-          changed = true;
-        }
-      } else if (session.templateAppName) {
-        delete session.templateAppName;
-        changed = true;
-      }
     }
 
     if (Object.prototype.hasOwnProperty.call(extra, 'templateAppliedAt')) {
@@ -3471,11 +3161,21 @@ export async function updateSessionRuntimePreferences(id, patch = {}) {
   return enrichSessionMeta(result.meta);
 }
 
+async function hasBlockingInteractiveRun(session) {
+  if (!session || !isSessionRunning(session)) return false;
+  const runId = getSessionRunId(session);
+  if (!runId) return true;
+  const run = await getRun(runId);
+  if (!run || isTerminalRunState(run.state)) return false;
+  const manifest = await getRunManifest(runId);
+  return !isReplySelfRepairOperation(manifest);
+}
+
 export async function saveSessionAsTemplate(sessionId, name = '') {
   const session = await getSession(sessionId);
   if (!session) return null;
   if (session.visitorId) return null;
-  if (isSessionRunning(session)) return null;
+  if (await hasBlockingInteractiveRun(session)) return null;
 
   const [snapshot, contextHead] = await Promise.all([
     getHistorySnapshot(sessionId),
@@ -3506,40 +3206,38 @@ export async function saveSessionAsTemplate(sessionId, name = '') {
   });
 }
 
-export async function applyAppTemplateToSession(sessionId, appId) {
+export async function applyTemplateToSession(sessionId, templateId) {
   const session = await getSession(sessionId);
   if (!session) return null;
   if (session.visitorId) return null;
   if (isSessionRunning(session)) return null;
   if ((session.messageCount || 0) > 0) return null;
 
-  const app = await getApp(appId);
-  if (!app) return null;
+  const template = await getApp(templateId);
+  if (!template) return null;
 
   if (await sessionHasTemplateContextEvent(sessionId)) {
     return null;
   }
 
-  if (!app.templateContext?.content && !(app.systemPrompt || '').trim()) {
+  if (!template.templateContext?.content && !(template.systemPrompt || '').trim()) {
     return null;
   }
 
-  const templateFreshness = await resolveAppTemplateFreshness(app);
+  const templateFreshness = await resolveAppTemplateFreshness(template);
 
   const appliedAt = nowIso();
-  const updatedSession = await applySessionAppMetadata(sessionId, app, {
-    templateAppId: app.id,
-    templateAppName: app.name || '',
+  const updatedSession = await applySessionTemplateMetadata(sessionId, template, {
     templateAppliedAt: appliedAt,
   });
   if (!updatedSession) return null;
 
-  if (app.templateContext?.content) {
+  if (template.templateContext?.content) {
     await appendEvent(sessionId, {
       type: 'template_context',
-      templateName: app.name || 'Template',
-      appId: app.id,
-      content: app.templateContext.content,
+      templateId: template.id,
+      templateName: template.name || 'Template',
+      content: template.templateContext.content,
       ...templateFreshness,
       timestamp: Date.now(),
     });
@@ -3846,8 +3544,10 @@ export async function forkSession(sessionId) {
   const child = await createSession(source.folder, source.tool, buildForkSessionName(source), {
     group: source.group || '',
     description: source.description || '',
-    appId: source.appId || '',
-    appName: source.appName || '',
+    sourceId: source.sourceId || '',
+    sourceName: source.sourceName || '',
+    templateId: source.templateId || '',
+    templateName: source.templateName || '',
     systemPrompt: source.systemPrompt || '',
     activeAgreements: source.activeAgreements || [],
     userId: source.userId || '',
@@ -3905,10 +3605,10 @@ export async function delegateSession(sessionId, payload = {}) {
   const inheritRuntimePreferences = !requestedTool || requestedTool === source.tool;
 
   const child = await createSession(source.folder, nextTool, requestedName || buildDelegatedSessionName(source, task), {
-    appId: source.appId || '',
-    appName: source.appName || '',
     sourceId: source.sourceId || '',
     sourceName: source.sourceName || '',
+    templateId: source.templateId || '',
+    templateName: source.templateName || '',
     systemPrompt: source.systemPrompt || '',
     activeAgreements: source.activeAgreements || [],
     model: inheritRuntimePreferences ? source.model || '' : '',
@@ -3933,6 +3633,7 @@ export async function delegateSession(sessionId, payload = {}) {
   });
 
   if (!runInternally) {
+    await appendEvent(source.id, buildDelegationContextOperation(task, child));
     await appendEvent(source.id, messageEvent('assistant', buildDelegationNoticeMessage(task, child), undefined, {
       messageKind: 'session_delegate_notice',
     }));

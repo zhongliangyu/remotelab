@@ -115,7 +115,7 @@ function isHiddenEvent(event) {
 function isVisibleEvent(event) {
   if (!event || typeof event !== 'object') return false;
   if (event.type === 'message') return true;
-  if (event.type === 'context_barrier' || event.type === 'usage') return true;
+  if (event.type === 'context_barrier' || event.type === 'context_operation' || event.type === 'usage') return true;
   if (event.type === 'status') return !isIgnoredStatusEvent(event) && !!String(event.content || '').trim();
   return false;
 }

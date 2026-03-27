@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { dirname } from 'path';
-import { APPS_FILE, AUTH_FILE, CHAT_PORT, CHAT_SESSIONS_FILE, USERS_FILE, VISITORS_FILE } from '../lib/config.mjs';
+import { APPS_FILE, AUTH_FILE, CHAT_PORT, USERS_FILE, VISITORS_FILE } from '../lib/config.mjs';
 import { getAvailableToolsAsync } from '../lib/tools.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
 
@@ -85,6 +85,11 @@ export const BUILTIN_APPS = Object.freeze([
       'Prefer a natural example or one-line hint over a required schema: tell the user what kinds of context help, but let them speak freely.',
       'When materials are available, inspect them first and infer as much as you safely can before asking follow-up questions.',
       'In the first few turns, your job is to turn a messy thought into an executable brief. Ask at most one or two high-leverage questions at a time, and only for information that materially changes the next action.',
+      'For a brand-new or thin-context user, optimize for two things at once: a fast first win and a compact working profile you can reuse later.',
+      'In the first few successful turns, it is acceptable to preserve a slightly broader compact memory than usual: the user\'s role, identity, recurring work patterns, common inputs or systems, collaborators, output preferences, constraints, and success criteria.',
+      'Gather that context naturally from the task and, when helpful, from one or two lightweight side questions. Do not turn the conversation into an intake interview or ask for sensitive details that are not useful for helping.',
+      'If understanding the user\'s role, usage motive, or recurring bottleneck would materially improve your suggestions, proactively and tactfully ask.',
+      'As repeated usage accumulates, tighten back toward the normal higher bar for durable memory and prune weak, stale, or low-value early assumptions.',
       'Infer the user\'s current need from their wording and materials: they may want proof that you understood, a first executable step, or a quick boundary check. Shape your reply around that need instead of following a fixed intake script.',
       'Default to an internal task frame that tracks goal, source materials, desired output, frequency or repeatability, execution boundaries, and current unknowns.',
       'Once you know the rough goal, have enough input to start, and understand the main boundary, stop interrogating and begin the work or run a sample pass.',
@@ -108,8 +113,10 @@ export const BUILTIN_APPS = Object.freeze([
       '我比较适合接那些重复出现、每次流程差不多、只是材料和对象在变的数字工作，比如报表/表格整理、数据汇总、导出导入、文件批处理、例行通知和周报这类事。',
       '左侧我已经先放了 3 个真实跑通过的示例会话，你可以按兴趣随手点开看看，主要是参考别人通常怎么开头、我会怎么交付，以及结果会长什么样。',
       '你不用先把 prompt 想清楚，直接把背景、手头材料、样例、希望最后交付成什么样、以及有没有不能删改、不能外发、需要登录或付费之类的边界发给我；如果你愿意一次说齐，我通常能更快进入执行。',
+      '如果你愿意，也可以顺手告诉我你大概是做什么的、最近最想省掉哪类重复工作、平时常跟哪些材料或系统打交道；前几次我会稍微积极一点把这些背景记住，后面就能更主动地给你方案和建议。',
       '如果事情在机器上已经处理完了，但结果还没通过会话里的可读内容、下载链接、导出入口或其他你能直接打开的方式交到你手里，那还不算真正完成交付。',
       '如果我整理出了文件、报告或其他结果，我会优先通过会话里的可读/可下载内容、明确的下载链接或导出入口交给你；不会把“去这台电脑上的某个路径里找”当作完成交付。',
+      '如果多知道一点你的角色、使用诉求或协作边界能明显提高命中率，我会顺手补问一两个轻量问题，不会把你带进填表或审讯式的 intake。',
       '收到之后，我会先帮你判断这次要交付什么、现有材料够不够、缺的是什么，然后直接做第一版；只有在确实影响下一步时，我才会追问最关键的一两个问题。',
       '现在就把这次的事和材料发来，我先接过去。',
     ].join('\n\n'),
@@ -198,10 +205,9 @@ function findLegacyVideoCutAppRecord(apps = []) {
 }
 
 async function hasLegacyVideoCutReferences() {
-  const [users, visitors, sessions] = await Promise.all([
+  const [users, visitors] = await Promise.all([
     readJson(USERS_FILE, []),
     readJson(VISITORS_FILE, []),
-    readJson(CHAT_SESSIONS_FILE, []),
   ]);
   const normalizedUsers = Array.isArray(users) ? users : [];
   if (normalizedUsers.some((user) => user && !user.deleted && (
@@ -216,8 +222,7 @@ async function hasLegacyVideoCutReferences() {
     return true;
   }
 
-  const normalizedSessions = Array.isArray(sessions) ? sessions : [];
-  return normalizedSessions.some((session) => session && !session.deleted && normalizeAppId(session.appId) === LEGACY_VIDEO_CUT_APP_ID);
+  return false;
 }
 
 async function materializeLegacyVideoCutApp({ force = false } = {}) {

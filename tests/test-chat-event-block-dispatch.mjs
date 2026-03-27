@@ -80,6 +80,10 @@ const context = {
     calls.push(`context_barrier:${event.content}`);
     return { container, event };
   },
+  renderContextOperationInto(container, event) {
+    calls.push(`context_operation:${event.title || event.content}`);
+    return { container, event };
+  },
   renderUsageInto(container, event) {
     calls.push(`usage:${event.outputTokens || 0}`);
     return { container, event };
@@ -110,6 +114,7 @@ context.renderHiddenBlockEventsInto({}, [
   { type: 'file_change', filePath: 'src/app.js' },
   { type: 'usage', outputTokens: 42 },
   { type: 'context_barrier', content: 'Older messages above this marker are no longer in live context.' },
+  { type: 'context_operation', title: 'Live context compacted' },
   { type: 'template_context', content: 'internal note' },
 ]);
 
@@ -123,6 +128,7 @@ assert.deepEqual(calls, [
   'file_change:src/app.js',
   'usage:42',
   'context_barrier:Older messages above this marker are no longer in live context.',
+  'context_operation:Live context compacted',
   'unknown:template_context',
 ], 'expanded folded blocks should render all folded event kinds and fall back safely for unknown ones');
 

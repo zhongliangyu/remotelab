@@ -442,8 +442,6 @@ async function createBackfillSession(client, snapshot, options) {
       folder: snapshot.config.sessionFolder || homedir(),
       tool: options.tool,
       name: 'Feishu backlog catch-up',
-      appId: 'feishu',
-      appName: sourceName,
       sourceId: SOURCE_ID,
       sourceName,
       group: 'Feishu',

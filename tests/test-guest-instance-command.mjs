@@ -11,6 +11,7 @@ import {
   buildGuestMailboxAddress,
   buildMainlandBaseUrl,
   formatGuestInstance,
+  formatGuestInstanceLinks,
   parseArgs,
   planGuestRuntimeDefaults,
   pickNextTrialInstanceName,
@@ -83,6 +84,28 @@ assert.equal(
 assert.equal(parseArgs(['create-trial', '--json']).json, true);
 assert.equal(parseArgs(['create-trial', '--json']).trial, true);
 assert.equal(parseArgs(['create-trial', '--json']).command, 'create');
+assert.equal(parseArgs(['links']).command, 'links');
+assert.equal(parseArgs(['links', 'trial24', '--check']).name, 'trial24');
+assert.equal(parseArgs(['links', 'trial24', '--check']).check, true);
+
+const formattedLinks = formatGuestInstanceLinks([
+  {
+    name: 'trial24',
+    accessUrl: 'https://trial24.example.com/?token=abc123',
+    mainlandAccessUrl: 'https://jojotry.nat100.top/trial24/?token=abc123',
+    localAccessUrl: 'http://127.0.0.1:7711/?token=abc123',
+    mailboxAddress: 'trial24@example.com',
+    localReachable: true,
+    publicReachable: true,
+    publicBaseUrl: 'https://trial24.example.com',
+  },
+], { check: true });
+assert.match(formattedLinks, /name: trial24/);
+assert.match(formattedLinks, /access: https:\/\/trial24\.example\.com\/\?token=abc123/);
+assert.match(formattedLinks, /mainlandAccess: https:\/\/jojotry\.nat100\.top\/trial24\/\?token=abc123/);
+assert.match(formattedLinks, /localAccess: http:\/\/127\.0\.0\.1:7711\/\?token=abc123/);
+assert.match(formattedLinks, /mailbox: trial24@example\.com/);
+assert.match(formattedLinks, /publicStatus: reachable/);
 
 const syncedProvisioning = await syncGuestMailboxProvisioning({ name: 'trial16' }, {
   mailboxIdentity: {
@@ -269,13 +292,18 @@ assert.equal(
   'fresh guests should keep the micro-agent model default',
 );
 assert.equal(
+  plannedFreshGuestDefaults.tools[0].reasoning.default,
+  'medium',
+  'safe owner presets should normalize micro-agent copies to the product default effort',
+);
+assert.equal(
   plannedFreshGuestDefaults.selection.selectedEffort,
-  '',
-  'micro-agent defaults should clear stale enum effort values',
+  'medium',
+  'fresh guests should fall back to the micro-agent product effort instead of inheriting the owner effort',
 );
 assert.equal(
   plannedFreshGuestDefaults.selection.reasoningKind,
-  'none',
+  'enum',
   'micro-agent defaults should follow the tool reasoning mode',
 );
 
@@ -307,8 +335,8 @@ assert.equal(
 );
 assert.equal(
   plannedUpdatedGuestDefaults.selection.selectedEffort,
-  '',
-  'non-reasoning tools should not keep stale effort values',
+  'medium',
+  'normalized micro-agent copies should keep the product default effort',
 );
 
 const plannedProductDefaultGuestDefaults = planGuestRuntimeDefaults({
@@ -325,12 +353,12 @@ assert.equal(
 );
 assert.equal(
   plannedProductDefaultGuestDefaults.selection.selectedEffort,
-  '',
-  'the product default should not hardcode a Codex reasoning level',
+  'medium',
+  'the product default should seed micro-agent at medium effort',
 );
 assert.equal(
   plannedProductDefaultGuestDefaults.selection.reasoningKind,
-  'none',
+  'enum',
   'the product default should inherit the tool reasoning mode',
 );
 
@@ -489,6 +517,69 @@ try {
   assert.doesNotMatch(rewrittenGuestPlist, /<key>REMOTELAB_ENABLE_ACTIVE_RELEASE<\/key>/);
 } finally {
   rmSync(syncSandboxHome, { recursive: true, force: true });
+}
+
+const linksSandboxHome = mkdtempSync(join(tmpdir(), 'remotelab-guest-instance-links-'));
+try {
+  const configDir = join(linksSandboxHome, '.config', 'remotelab');
+  const instanceRoot = join(linksSandboxHome, '.remotelab', 'instances', 'trial24');
+  const instanceConfigDir = join(instanceRoot, 'config');
+  mkdirSync(configDir, { recursive: true });
+  mkdirSync(instanceConfigDir, { recursive: true });
+  writeFileSync(join(configDir, 'guest-instance-defaults.json'), JSON.stringify({
+    mainlandBaseUrl: 'https://jojotry.nat100.top',
+  }, null, 2));
+  writeFileSync(join(configDir, 'guest-instances.json'), JSON.stringify([
+    {
+      name: 'trial24',
+      label: 'com.chatserver.trial24',
+      port: 7711,
+      hostname: 'trial24.example.com',
+      instanceRoot,
+      configDir: instanceConfigDir,
+      memoryDir: join(instanceRoot, 'memory'),
+      authFile: join(instanceConfigDir, 'auth.json'),
+      launchAgentPath: join(linksSandboxHome, 'Library', 'LaunchAgents', 'com.chatserver.trial24.plist'),
+      logPath: join(linksSandboxHome, 'Library', 'Logs', 'chat-server-trial24.log'),
+      errorLogPath: join(linksSandboxHome, 'Library', 'Logs', 'chat-server-trial24.error.log'),
+      publicBaseUrl: 'https://trial24.example.com',
+      localBaseUrl: 'http://127.0.0.1:7711',
+      sessionExpiryDays: 30,
+      createdAt: '2026-03-26T14:56:25.700Z',
+    },
+  ], null, 2));
+  writeFileSync(join(instanceConfigDir, 'auth.json'), JSON.stringify({ token: 'abc123' }, null, 2));
+
+  const linksResult = spawnSync('node', ['cli.js', 'guest-instance', 'links', '--json'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: linksSandboxHome,
+    },
+  });
+  assert.equal(linksResult.status, 0, linksResult.stderr || linksResult.stdout);
+  const linksOutput = JSON.parse(linksResult.stdout);
+  assert.equal(linksOutput.length, 1);
+  assert.equal(linksOutput[0].name, 'trial24');
+  assert.equal(linksOutput[0].accessUrl, 'https://trial24.example.com/?token=abc123');
+  assert.equal(linksOutput[0].mainlandAccessUrl, 'https://jojotry.nat100.top/trial24/?token=abc123');
+  assert.equal(linksOutput[0].localAccessUrl, 'http://127.0.0.1:7711/?token=abc123');
+
+  const singleLinksResult = spawnSync('node', ['cli.js', 'guest-instance', 'links', 'trial24', '--json'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: linksSandboxHome,
+    },
+  });
+  assert.equal(singleLinksResult.status, 0, singleLinksResult.stderr || singleLinksResult.stdout);
+  const singleLinksOutput = JSON.parse(singleLinksResult.stdout);
+  assert.equal(singleLinksOutput.name, 'trial24');
+  assert.equal(singleLinksOutput.accessUrl, 'https://trial24.example.com/?token=abc123');
+} finally {
+  rmSync(linksSandboxHome, { recursive: true, force: true });
 }
 
 console.log('test-guest-instance-command: ok');

@@ -68,13 +68,22 @@ async function addAttachmentFiles(files) {
   if (typeof hasPendingComposerSend === "function" && hasPendingComposerSend()) {
     return;
   }
-  for (const file of files) {
-    pendingImages.push(buildPendingAttachment(file));
+  if (!currentSessionId) {
+    return;
+  }
+  if (typeof addComposerAttachmentsState === "function") {
+    addComposerAttachmentsState(
+      Array.from(files || [], (file) => buildPendingAttachment(file)),
+      { sessionId: currentSessionId },
+    );
   }
   renderImagePreviews();
 }
 
 function renderImagePreviews() {
+  const pendingImages = currentSessionId && typeof getComposerAttachmentsState === "function"
+    ? getComposerAttachmentsState(currentSessionId)
+    : [];
   imgPreviewStrip.innerHTML = "";
   if (pendingImages.length === 0) {
     imgPreviewStrip.classList.remove("has-images");
@@ -101,7 +110,9 @@ function renderImagePreviews() {
     removeBtn.onclick = () => {
       if (attachmentsLocked) return;
       URL.revokeObjectURL(img.objectUrl);
-      pendingImages.splice(i, 1);
+      if (typeof removeComposerAttachmentState === "function") {
+        removeComposerAttachmentState(i, { sessionId: currentSessionId });
+      }
       renderImagePreviews();
     };
     if (previewNode) {

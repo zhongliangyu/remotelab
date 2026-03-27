@@ -11,7 +11,7 @@ const workspace = join(home, 'workspace');
 mkdirSync(workspace, { recursive: true });
 
 const {
-  applyAppTemplateToSession,
+  applyTemplateToSession,
   createSession,
   getHistory,
   killAll,
@@ -71,31 +71,31 @@ try {
     source: 'test',
   });
 
-  const app = await saveSessionAsTemplate(source.id, 'Warmed subtask');
-  assert.ok(app?.id, 'saving a session as a template should create an app');
-  assert.equal(app.name, 'Warmed subtask');
-  assert.equal(app.tool, 'missing-tool');
-  assert.equal(app.systemPrompt, 'Stay inside the saved subtask template.');
-  assert.ok(app.templateContext?.sourceSessionUpdatedAt, 'saved templates should track the source session freshness timestamp');
-  assert.match(app.templateContext?.content || '', /This template covers the warmed subtask context\./);
-  assert.match(app.templateContext?.content || '', /ls -la/);
+  const template = await saveSessionAsTemplate(source.id, 'Warmed subtask');
+  assert.ok(template?.id, 'saving a session as a template should create a template');
+  assert.equal(template.name, 'Warmed subtask');
+  assert.equal(template.tool, 'missing-tool');
+  assert.equal(template.systemPrompt, 'Stay inside the saved subtask template.');
+  assert.ok(template.templateContext?.sourceSessionUpdatedAt, 'saved templates should track the source session freshness timestamp');
+  assert.match(template.templateContext?.content || '', /This template covers the warmed subtask context\./);
+  assert.match(template.templateContext?.content || '', /ls -la/);
 
   const target = await createSession(workspace, 'codex', 'Fresh session', {
     group: 'Templates',
     description: 'Target session for applying a saved template.',
   });
-  const applied = await applyAppTemplateToSession(target.id, app.id);
+  const applied = await applyTemplateToSession(target.id, template.id);
   assert.ok(applied, 'template should apply to a fresh session');
-  assert.equal(applied.appId, app.id, 'app scope should switch to the saved template');
-  assert.equal(applied.appName, 'Warmed subtask', 'session should keep the template display name');
+  assert.equal(applied.templateId, template.id, 'session should keep the template id');
+  assert.equal(applied.templateName, 'Warmed subtask', 'session should keep the template display name');
   assert.equal(applied.systemPrompt, 'Stay inside the saved subtask template.', 'template prompt should be applied');
   assert.equal(applied.tool, 'missing-tool', 'template tool should be applied to the session');
-  assert.equal(applied.templateAppId, app.id, 'session should record which template was applied');
 
   const targetHistory = await getHistory(target.id);
   const templateEvent = targetHistory.find((event) => event.type === 'template_context');
   assert.ok(templateEvent, 'applying a template should append a hidden template context event');
   assert.equal(templateEvent.templateName, 'Warmed subtask');
+  assert.equal(templateEvent.templateId, template.id);
   assert.equal(templateEvent.templateFreshness, 'current', 'fresh templates should record a current freshness state');
   assert.match(templateEvent.content, /This template covers the warmed subtask context\./);
 
@@ -116,7 +116,7 @@ try {
     group: 'Templates',
     description: 'Target session for stale saved-template coverage.',
   });
-  const staleApplied = await applyAppTemplateToSession(staleTarget.id, app.id);
+  const staleApplied = await applyTemplateToSession(staleTarget.id, template.id);
   assert.ok(staleApplied, 'stale templates should still be applicable');
 
   const staleHistory = await getHistory(staleTarget.id);

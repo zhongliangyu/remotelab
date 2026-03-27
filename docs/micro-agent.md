@@ -19,7 +19,9 @@ The installer writes one custom tool record into `~/.config/remotelab/tools.json
 - `command: codex`
 - `runtimeFamily: codex-json`
 - `toolProfile: micro-agent`
-- `reasoning.kind: none`
+- `reasoning.kind: enum` with default `medium`
+
+The preset intentionally starts at `medium` thinking so cold-start turns land faster while still leaving higher effort available when the task needs it.
 
 So the UI treats it like a lightweight preset, while the actual runtime stays the normal Codex CLI.
 Unlike the earlier bare-user version, it now follows RemoteLab's normal session prompt/context chain so memory activation, manager policy, and continuation behavior stay aligned with the built-in `codex` tool.

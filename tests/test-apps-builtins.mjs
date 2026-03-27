@@ -97,6 +97,8 @@ try {
   assert.match(welcomeApp?.systemPrompt || '', /new assistant receiving a handoff|report or spreadsheet cleanup|exports and imports/i);
   assert.match(welcomeApp?.systemPrompt || '', /project mechanics|project structure|folders, notes/i);
   assert.match(welcomeApp?.systemPrompt || '', /durable knowledge|repeat themselves/i);
+  assert.match(welcomeApp?.systemPrompt || '', /fast first win|compact working profile|recurring work patterns/i);
+  assert.match(welcomeApp?.systemPrompt || '', /lightweight side questions|usage motive|recurring bottleneck/i);
   assert.match(welcomeApp?.systemPrompt || '', /internal task frame|backend-owned hidden state|concrete materials/i);
   assert.match(welcomeApp?.systemPrompt || '', /execution surface|local paths|complete handoff/i);
   assert.match(welcomeApp?.systemPrompt || '', /machine-side execution and user-visible delivery as separate steps|read, download, open, or otherwise reach the result/i);
@@ -105,9 +107,11 @@ try {
   assert.match(welcomeApp?.welcomeMessage || '', /执行工作的地方|翻文件|取结果的界面/u);
   assert.match(welcomeApp?.welcomeMessage || '', /报表\/表格整理|导出导入|文件批处理/u);
   assert.match(welcomeApp?.welcomeMessage || '', /prompt 想清楚|一次说齐|进入执行/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /大概是做什么的|最想省掉哪类重复工作|哪些材料或系统/u);
   assert.match(welcomeApp?.welcomeMessage || '', /还不算真正完成交付|交到你手里/u);
   assert.match(welcomeApp?.welcomeMessage || '', /下载链接|导出入口/u);
   assert.match(welcomeApp?.welcomeMessage || '', /可读\/可下载内容|某个路径里找/u);
+  assert.match(welcomeApp?.welcomeMessage || '', /角色、使用诉求或协作边界|轻量问题|填表或审讯式/u);
   assert.match(welcomeApp?.welcomeMessage || '', /最关键的一两个问题|现在就把这次的事和材料发来/u);
 
   const basicChatApp = await getApp(BASIC_CHAT_APP_ID);

@@ -30,10 +30,13 @@ const {
 } = await import('./chat/runs.mjs');
 
 try {
-  const parent = await createSession(workspace, 'codex', 'Source session', {
+  const parent = await createSession(workspace, 'codex', 'Invoice discussion', {
     group: 'Painting',
     description: 'Original discussion to branch from',
-    appId: 'app-owner-console',
+    sourceId: 'email',
+    sourceName: 'Email',
+    templateId: 'app-owner-console',
+    templateName: 'Owner Console',
     systemPrompt: 'Stay focused on the user topic.',
     externalTriggerId: 'email-thread:parent-thread',
     completionTargets: [{
@@ -118,12 +121,12 @@ try {
   const child = await forkSession(parent.id);
   assert.ok(child, 'fork should create a child session');
   assert.notEqual(child.id, parent.id, 'fork should create a new session id');
-  assert.equal(child.name, 'fork - Source session', 'fork should keep the fixed name prefix');
+  assert.equal(child.name, 'fork - Invoice discussion', 'fork should keep the fixed name prefix');
   assert.equal(child.group, parent.group, 'fork should copy the session group');
   assert.equal(child.description, parent.description, 'fork should copy the session description');
   assert.equal(child.folder, parent.folder, 'fork should keep the same folder');
   assert.equal(child.tool, parent.tool, 'fork should keep the same tool');
-  assert.equal(child.appId, parent.appId, 'fork should keep the same app scope');
+  assert.equal(child.templateId, parent.templateId, 'fork should keep the same template scope');
   assert.equal(child.systemPrompt, parent.systemPrompt, 'fork should keep the same prompt');
   assert.equal(child.forkedFromSessionId, parent.id, 'fork should record the parent id');
   assert.equal(child.rootSessionId, parent.id, 'first fork should use parent as root');

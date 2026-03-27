@@ -5,7 +5,7 @@ import {
   loadHistory,
   setContextHead,
 } from './history.mjs';
-import { messageEvent, statusEvent } from './normalizer.mjs';
+import { contextOperationEvent, messageEvent, statusEvent } from './normalizer.mjs';
 import { buildTemplateFreshnessNotice } from './session-continuation.mjs';
 import { formatAttachmentContextLine, getMessageAttachments } from './attachment-utils.mjs';
 import { updateRun } from './runs.mjs';
@@ -94,6 +94,61 @@ function getAutoCompactStatusText(run) {
     return `Live context exceeded ${autoCompactTokens.toLocaleString()} tokens — compacting conversation…`;
   }
   return 'Live context overflowed — compacting conversation…';
+}
+
+function trimCompactionReason(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) return '';
+  return normalized.replace(/[.。…\s]+$/u, '');
+}
+
+function getCompactionTriggerReason(run, { automatic = false } = {}) {
+  if (!automatic) return 'Manual context compaction was requested';
+  return trimCompactionReason(getAutoCompactStatusText(run));
+}
+
+function buildQueuedCompactionOperation(sessionId, compactorSessionId, compactionSource, run, { automatic = false } = {}) {
+  return contextOperationEvent({
+    operation: 'compact_context',
+    phase: 'queued',
+    trigger: automatic ? 'automatic' : 'manual',
+    title: automatic ? 'Auto Compress queued' : 'Context compaction queued',
+    summary: 'RemoteLab started condensing older live context into a continuation handoff.',
+    reason: getCompactionTriggerReason(run, { automatic }),
+    targetSessionId: sessionId,
+    workerSessionId: compactorSessionId,
+    compactedThroughSeq: Number.isInteger(compactionSource?.targetSeq) ? compactionSource.targetSeq : 0,
+    hadExistingSummary: !!String(compactionSource?.existingSummary || '').trim(),
+  });
+}
+
+function buildFailedCompactionOperation(sessionId, errorMessage, { automatic = false, workerSessionId = '' } = {}) {
+  return contextOperationEvent({
+    operation: 'compact_context',
+    phase: 'failed',
+    trigger: automatic ? 'automatic' : 'manual',
+    title: automatic ? 'Auto Compress failed' : 'Context compaction failed',
+    summary: 'RemoteLab could not replace older live context with a continuation handoff.',
+    reason: errorMessage,
+    targetSessionId: sessionId,
+    ...(workerSessionId ? { workerSessionId } : {}),
+  });
+}
+
+function buildAppliedCompactionOperation(targetSessionId, run, manifest, summary) {
+  const automatic = manifest?.compactionReason === 'automatic';
+  return contextOperationEvent({
+    operation: 'compact_context',
+    phase: 'applied',
+    trigger: automatic ? 'automatic' : 'manual',
+    title: automatic ? 'Live context compacted' : 'Context compaction applied',
+    summary: 'Older live context was replaced with a continuation summary and handoff.',
+    reason: getCompactionTriggerReason(run, { automatic }),
+    targetSessionId,
+    workerSessionId: run?.sessionId || '',
+    compactedThroughSeq: Number.isInteger(manifest?.compactionSourceSeq) ? manifest.compactionSourceSeq : 0,
+    summaryChars: typeof summary === 'string' ? summary.length : 0,
+  });
 }
 
 function parseCompactionWorkerOutput(content) {
@@ -411,6 +466,13 @@ export async function queueContextCompaction(sessionId, session, run, { automati
     : 'Auto Compress is condensing older context…';
   const compactQueuedEvent = statusEvent(statusText);
   await services.appendEvent(sessionId, compactQueuedEvent);
+  await services.appendEvent(sessionId, buildQueuedCompactionOperation(
+    sessionId,
+    compactorSession.id,
+    compactionSource,
+    run,
+    { automatic },
+  ));
   services.broadcastSessionInvalidation(sessionId);
 
   try {
@@ -440,6 +502,10 @@ export async function queueContextCompaction(sessionId, session, run, { automati
     live.pendingCompact = false;
     const failure = statusEvent(`error: failed to compact context: ${error.message}`);
     await services.appendEvent(sessionId, failure);
+    await services.appendEvent(sessionId, buildFailedCompactionOperation(sessionId, error.message, {
+      automatic,
+      workerSessionId: compactorSession.id,
+    }));
     services.broadcastSessionInvalidation(sessionId);
     return false;
   }
@@ -476,6 +542,14 @@ export async function applyCompactionWorkerResult(targetSessionId, run, manifest
   const summary = parsed.summary;
   if (!summary) {
     await services.appendEvent(targetSessionId, statusEvent('error: failed to apply auto compress: compaction worker returned no <summary> block'));
+    await services.appendEvent(targetSessionId, buildFailedCompactionOperation(
+      targetSessionId,
+      'Compaction worker returned no <summary> block',
+      {
+        automatic: manifest?.compactionReason === 'automatic',
+        workerSessionId: run?.sessionId || '',
+      },
+    ));
     return false;
   }
 
@@ -488,6 +562,7 @@ export async function applyCompactionWorkerResult(targetSessionId, run, manifest
     source: 'context_compaction_handoff',
     compactionRunId: run.id,
   }));
+  await services.appendEvent(targetSessionId, buildAppliedCompactionOperation(targetSessionId, run, manifest, summary));
   const compactEvent = await services.appendEvent(targetSessionId, statusEvent('Auto Compress finished — continue from the handoff below'));
 
   await setContextHead(targetSessionId, {

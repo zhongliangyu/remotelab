@@ -188,21 +188,22 @@ try {
     await waitFor(async () => {
       const detail = await request(port, 'GET', `/api/sessions/${source.id}`);
       if (detail.status !== 200) return false;
-      return Number(detail.json.session?.messageCount || 0) >= 2;
+      return Number(detail.json.session?.messageCount || 0) >= 2
+        && detail.json.session?.activity?.run?.state !== 'running';
     }, 'source session history sync');
 
     const saved = await request(port, 'POST', `/api/sessions/${source.id}/save-template`, {
       name: 'Saved via HTTP',
     });
-    assert.equal(saved.status, 201, 'save-template route should create an app');
-    assert.ok(saved.json.app?.id, 'save-template route should return the created app');
+    assert.equal(saved.status, 201, 'save-template route should create a template');
+    assert.ok(saved.json.template?.id, 'save-template route should return the created template');
 
     const target = await createSession(port, 'Template target');
     const applied = await request(port, 'POST', `/api/sessions/${target.id}/apply-template`, {
-      appId: saved.json.app.id,
+      templateId: saved.json.template.id,
     });
     assert.equal(applied.status, 200, 'apply-template route should update the target session');
-    assert.equal(applied.json.session?.appId, saved.json.app.id, 'applied session should inherit the template app scope');
+    assert.equal(applied.json.session?.templateId, saved.json.template.id, 'applied session should record the applied template');
 
     const events = await request(port, 'GET', `/api/sessions/${target.id}/events?filter=all`);
     const templateEvent = (events.json.events || []).find((event) => event.type === 'template_context');
@@ -222,7 +223,7 @@ try {
 
     const staleTarget = await createSession(port, 'Template stale target');
     const staleApplied = await request(port, 'POST', `/api/sessions/${staleTarget.id}/apply-template`, {
-      appId: saved.json.app.id,
+      templateId: saved.json.template.id,
     });
     assert.equal(staleApplied.status, 200, 'stale template should still apply');
 

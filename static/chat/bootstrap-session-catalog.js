@@ -38,10 +38,26 @@ let currentThinkingBlock = null; // { el, body, tools: Set }
 let inThinkingBlock = false;
 
 let activeSourceFilter = normalizeSourceFilter(
-  localStorage.getItem(ACTIVE_SOURCE_FILTER_STORAGE_KEY)
+  (typeof getActiveSourceFilterValue === "function" ? getActiveSourceFilterValue() : "")
+  || localStorage.getItem(ACTIVE_SOURCE_FILTER_STORAGE_KEY)
   || localStorage.getItem(LEGACY_ACTIVE_SOURCE_FILTER_STORAGE_KEY)
   || FILTER_ALL_VALUE,
 );
+
+if (typeof setChatActiveSourceFilter === "function") {
+  setChatActiveSourceFilter(activeSourceFilter, {
+    normalizeSourceFilter,
+  });
+  activeSourceFilter = typeof getActiveSourceFilterValue === "function"
+    ? normalizeSourceFilter(getActiveSourceFilterValue())
+    : activeSourceFilter;
+} else if (typeof dispatchChatStore === "function") {
+  dispatchChatStore({
+    type: "set-active-source-filter",
+    value: activeSourceFilter,
+    normalizeSourceFilter,
+  });
+}
 
 function registerHiddenMarkdownExtensions() {
   const hiddenTagStart = /<(private|hide)\b/i;
@@ -119,7 +135,9 @@ function buildNavigationUrl(state = {}) {
   const nextSessionId =
     state.sessionId === undefined ? currentSessionId : state.sessionId;
   const nextTab = normalizeSidebarTab(
-    state.tab === undefined ? activeTab : state.tab,
+    state.tab === undefined
+      ? (typeof getActiveSidebarTabValue === "function" ? getActiveSidebarTabValue() : activeTab)
+      : state.tab,
   );
   const url = new URL(window.location.href);
   url.searchParams.delete("visitor");
@@ -139,7 +157,9 @@ function syncBrowserState(state = {}) {
   const nextSessionId =
     state.sessionId === undefined ? currentSessionId : state.sessionId;
   const nextTab = normalizeSidebarTab(
-    state.tab === undefined ? activeTab : state.tab,
+    state.tab === undefined
+      ? (typeof getActiveSidebarTabValue === "function" ? getActiveSidebarTabValue() : activeTab)
+      : state.tab,
   );
   persistActiveSessionId(nextSessionId);
   persistActiveSidebarTab(nextTab);
@@ -265,7 +285,9 @@ function syncSidebarFiltersVisibility(showingSessions = null) {
   if (!sidebarFilters) return;
   const resolvedShowingSessions = typeof showingSessions === "boolean"
     ? showingSessions
-    : (typeof activeTab === "string" ? activeTab === "sessions" : true);
+    : ((typeof getActiveSidebarTabValue === "function"
+      ? getActiveSidebarTabValue()
+      : activeTab) === "sessions");
   const controls = [sourceFilterSelect].filter(Boolean);
   const hasVisibleControls = controls.length === 0
     ? true
@@ -288,6 +310,17 @@ function renderSourceFilterOptions() {
     && !options.some(([value]) => value === activeSourceFilter)
   ) {
     activeSourceFilter = FILTER_ALL_VALUE;
+    if (typeof setChatActiveSourceFilter === "function") {
+      setChatActiveSourceFilter(activeSourceFilter, {
+        normalizeSourceFilter,
+      });
+    } else if (typeof dispatchChatStore === "function") {
+      dispatchChatStore({
+        type: "set-active-source-filter",
+        value: activeSourceFilter,
+        normalizeSourceFilter,
+      });
+    }
     persistActiveSourceFilter(activeSourceFilter);
   }
 
@@ -320,6 +353,20 @@ function renderSourceFilterOptions() {
 if (sourceFilterSelect) {
   sourceFilterSelect.addEventListener("change", () => {
     activeSourceFilter = normalizeSourceFilter(sourceFilterSelect.value);
+    if (typeof setChatActiveSourceFilter === "function") {
+      setChatActiveSourceFilter(activeSourceFilter, {
+        normalizeSourceFilter,
+      });
+      activeSourceFilter = typeof getActiveSourceFilterValue === "function"
+        ? normalizeSourceFilter(getActiveSourceFilterValue())
+        : activeSourceFilter;
+    } else if (typeof dispatchChatStore === "function") {
+      dispatchChatStore({
+        type: "set-active-source-filter",
+        value: activeSourceFilter,
+        normalizeSourceFilter,
+      });
+    }
     persistActiveSourceFilter(activeSourceFilter);
     renderSourceFilterOptions();
     renderSessionList();
@@ -348,11 +395,17 @@ function compareSessionListSessions(a, b) {
   return getSessionSortTime(b) - getSessionSortTime(a);
 }
 
+function compareClientSessions(a, b) {
+  return getSessionPinSortRank(b) - getSessionPinSortRank(a)
+    || compareSessionListSessions(a, b);
+}
+
 function sortSessionsInPlace() {
-  sessions.sort((a, b) => (
-    getSessionPinSortRank(b) - getSessionPinSortRank(a)
-    || compareSessionListSessions(a, b)
-  ));
+  const compare = typeof compareClientSessions === "function"
+    ? compareClientSessions
+    : ((a, b) => getSessionPinSortRank(b) - getSessionPinSortRank(a)
+      || compareSessionListSessions(a, b));
+  sessions.sort(compare);
 }
 
 function getArchivedSessionSortTime(session) {
@@ -423,11 +476,13 @@ function applyNavigationState(rawState) {
     }
     syncBrowserState({
       sessionId: next.sessionId,
-      tab: next.tab || activeTab,
+      tab: next.tab || (typeof getActiveSidebarTabValue === "function" ? getActiveSidebarTabValue() : activeTab),
     });
     return;
   }
-  syncBrowserState({ tab: next.tab || activeTab });
+  syncBrowserState({
+    tab: next.tab || (typeof getActiveSidebarTabValue === "function" ? getActiveSidebarTabValue() : activeTab),
+  });
 }
 function t(key, vars) {
   return window.remotelabT ? window.remotelabT(key, vars) : key;

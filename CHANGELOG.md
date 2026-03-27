@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Removes the unused `Board` surface and keeps the shipped owner flow centered on sessions and settings.
+- Keeps the shipped owner flow centered on sessions and settings after retiring the unused planning surface.
 - Removes the last hidden web voice-cleanup path so the composer now sends text directly.
 - Keeps session workflow organization derived from `workflowState`, `workflowPriority`, review state, and live activity instead of a parallel planning surface.
 

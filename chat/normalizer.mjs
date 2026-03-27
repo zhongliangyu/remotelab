@@ -12,6 +12,10 @@ function createEvent(type, fields = {}) {
   };
 }
 
+function trimOptionalString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export function messageEvent(role, content, images, extra = {}) {
   const fields = { role, content, ...extra };
   if (images && images.length > 0) fields.attachments = images;
@@ -56,5 +60,40 @@ export function usageEvent({
     ...(Number.isFinite(outputTokens) ? { outputTokens } : {}),
     ...(Number.isFinite(contextWindowTokens) ? { contextWindowTokens } : {}),
     ...(typeof contextSource === 'string' && contextSource ? { contextSource } : {}),
+  });
+}
+
+export function contextOperationEvent({
+  operation,
+  phase,
+  title,
+  summary,
+  reason,
+  trigger,
+  content,
+  ...extra
+} = {}) {
+  const normalizedOperation = trimOptionalString(operation);
+  const normalizedPhase = trimOptionalString(phase);
+  const normalizedTitle = trimOptionalString(title);
+  const normalizedSummary = trimOptionalString(summary);
+  const normalizedReason = trimOptionalString(reason);
+  const normalizedTrigger = trimOptionalString(trigger);
+  const normalizedContent = trimOptionalString(content)
+    || normalizedTitle
+    || normalizedSummary
+    || normalizedOperation
+    || 'Context operation';
+
+  return createEvent('context_operation', {
+    role: 'system',
+    ...(normalizedOperation ? { operation: normalizedOperation } : {}),
+    ...(normalizedPhase ? { phase: normalizedPhase } : {}),
+    ...(normalizedTitle ? { title: normalizedTitle } : {}),
+    ...(normalizedSummary ? { summary: normalizedSummary } : {}),
+    ...(normalizedReason ? { reason: normalizedReason } : {}),
+    ...(normalizedTrigger ? { trigger: normalizedTrigger } : {}),
+    content: normalizedContent,
+    ...extra,
   });
 }

@@ -1,12 +1,12 @@
 # Remove Board + Rewrite Main Flow
 
-Status: current decision record as of 2026-03-18
+Status: archived decision record from 2026-03-18
 
-Product framing note: this is a workflow-organization decision record, not the canonical product headline. For current product positioning, use `README.md`, `README.zh.md`, and `notes/directional/product-vision.md`.
+Product framing note: this is historical workflow-organization rationale, not the canonical product headline. For the current operating baseline, use `notes/current/product-mainline.md`, `notes/current/session-first-workflow-surfaces.md`, and `notes/current/session-main-flow-next-push.md`.
 
 Related notes:
 
-- `notes/current/capability-first-shipping-plan.md`
+- `notes/archive/capability-first-shipping-plan.md`
 - `notes/current/session-main-flow-next-push.md`
 - `notes/current/session-first-workflow-surfaces.md`
 
@@ -79,4 +79,4 @@ Then discuss from first principles:
 
 Use this in the next session as the opening frame:
 
-"Please read `notes/current/remove-board-and-rewrite-main-flow.md` and continue the design from that premise. Assume the shipped `Board` is gone. Help redesign the owner main flow from a session-first baseline, with special focus on manager-style orchestration, multi-session visibility without a board, and bounded cross-session context freshness."
+"Please read `notes/archive/remove-board-and-rewrite-main-flow.md` and continue the design from that premise. Assume the shipped `Board` is gone. Help redesign the owner main flow from a session-first baseline, with special focus on manager-style orchestration, multi-session visibility without a board, and bounded cross-session context freshness."

@@ -60,9 +60,13 @@ async function dispatchAction(msg) {
         await fetchSessionsList();
         return true;
       case "attach": {
-        currentSessionId = msg.sessionId;
-        hasAttachedSession = true;
-        const attachedSession = getCurrentSession();
+        if (typeof setChatCurrentSession === "function") {
+          setChatCurrentSession(msg.sessionId, { hasAttachedSession: true });
+        } else {
+          currentSessionId = msg.sessionId;
+          hasAttachedSession = true;
+        }
+        const attachedSession = resolveCurrentSessionSnapshot();
         if (!attachedSession || attachedSession.id !== msg.sessionId) {
           await refreshCurrentSession();
           return true;
@@ -207,7 +211,8 @@ async function dispatchAction(msg) {
         const attachments = Array.isArray(msg.attachments)
           ? msg.attachments
           : (Array.isArray(msg.images) ? msg.images : []);
-        const canUseMultipart = attachments.some((image) => image?.file && typeof image.file.arrayBuffer === "function");
+        const hasLocalFileAttachments = attachments.some((image) => image?.file);
+        const canUseMultipart = hasLocalFileAttachments && typeof FormData === "function";
         const requestUrl = `/api/sessions/${encodeURIComponent(targetSessionId)}/messages`;
         const data = canUseMultipart
           ? await (async () => {
@@ -296,7 +301,7 @@ async function dispatchAction(msg) {
         const data = await fetchJsonOrRedirect(`/api/sessions/${encodeURIComponent(msg.sessionId || currentSessionId)}/apply-template`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ appId: msg.appId }),
+          body: JSON.stringify({ templateId: msg.templateId }),
         });
         if (data.session) {
           const session = upsertSession(data.session) || data.session;
@@ -357,20 +362,23 @@ function buildOptimisticArchivedSession(session, archived) {
   return next;
 }
 
+function resolveCurrentSessionSnapshot() {
+  return typeof getChatStoreSession === "function"
+    ? getChatStoreSession(currentSessionId)
+    : (sessions.find((session) => session.id === currentSessionId) || null);
+}
+
 function applyOptimisticSessionArchiveState(sessionId, archived) {
-  const index = sessions.findIndex((session) => session.id === sessionId);
-  if (index === -1) return null;
-  const previous = sessions[index];
+  const previous = typeof getChatStoreSession === "function"
+    ? getChatStoreSession(sessionId)
+    : (sessions.find((session) => session.id === sessionId) || null);
+  if (!previous) return null;
   const next = buildOptimisticArchivedSession(previous, archived);
   if (!next) return null;
-  if (previous?.archived !== true && archived) {
-    archivedSessionCount += 1;
-  } else if (previous?.archived === true && !archived) {
-    archivedSessionCount = Math.max(0, archivedSessionCount - 1);
+  upsertSession(next);
+  if (typeof refreshAppCatalog === "function") {
+    refreshAppCatalog();
   }
-  sessions[index] = next;
-  sortSessionsInPlace();
-  refreshAppCatalog();
   if (currentSessionId === sessionId) {
     applyAttachedSessionState(sessionId, next);
   } else {
@@ -381,20 +389,10 @@ function applyOptimisticSessionArchiveState(sessionId, archived) {
 
 function restoreOptimisticSessionSnapshot(session) {
   if (!session?.id) return;
-  const index = sessions.findIndex((entry) => entry.id === session.id);
-  const current = index === -1 ? null : sessions[index];
-  if (current?.archived !== true && session.archived === true) {
-    archivedSessionCount += 1;
-  } else if (current?.archived === true && session.archived !== true) {
-    archivedSessionCount = Math.max(0, archivedSessionCount - 1);
+  upsertSession(session);
+  if (typeof refreshAppCatalog === "function") {
+    refreshAppCatalog();
   }
-  if (index === -1) {
-    sessions.push(session);
-  } else {
-    sessions[index] = session;
-  }
-  sortSessionsInPlace();
-  refreshAppCatalog();
   if (currentSessionId === session.id) {
     applyAttachedSessionState(session.id, session);
   } else {
@@ -403,7 +401,9 @@ function restoreOptimisticSessionSnapshot(session) {
 }
 
 function getCurrentSession() {
-  return sessions.find((s) => s.id === currentSessionId) || null;
+  return typeof getChatStoreSession === "function"
+    ? getChatStoreSession(currentSessionId)
+    : (sessions.find((s) => s.id === currentSessionId) || null);
 }
 
 function handleWsMessage(msg) {
@@ -482,7 +482,11 @@ function updateStatus(connState, session = getCurrentSession()) {
   const activity = getSessionActivity(session);
   const runIsActive = activity.run.state === "running";
   const inputBusy = isSessionBusy(session);
-  sessionStatus = runIsActive ? "running" : "idle";
+  if (typeof setChatSessionStatus === "function") {
+    setChatSessionStatus(runIsActive ? "running" : "idle");
+  } else {
+    sessionStatus = runIsActive ? "running" : "idle";
+  }
   const showArchivedOnly = archived && visualStatus.key === "idle";
   if (showArchivedOnly) {
     statusDot.className = "status-dot";

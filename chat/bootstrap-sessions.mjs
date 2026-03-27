@@ -12,7 +12,7 @@ import { appendEvents, readEventsAfter } from './history.mjs';
 import { messageEvent } from './normalizer.mjs';
 import { SESSION_ENTRY_MODE_READ } from './session-entry-mode.mjs';
 import {
-  applyAppTemplateToSession,
+  applyTemplateToSession,
   createSession,
   getSession,
   listSessions,
@@ -134,7 +134,7 @@ function getOwnerBootstrapSessionDefinitions() {
 
   return [
     {
-      appId: WELCOME_APP_ID,
+      templateId: WELCOME_APP_ID,
       externalTriggerId: OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID,
       name: 'Welcome',
       entryMode: SESSION_ENTRY_MODE_READ,
@@ -148,7 +148,7 @@ function getOwnerBootstrapSessionDefinitions() {
       ],
     },
     {
-      appId: BASIC_CHAT_APP_ID,
+      templateId: BASIC_CHAT_APP_ID,
       externalTriggerId: OWNER_BOOTSTRAP_FILE_SHOWCASE_EXTERNAL_TRIGGER_ID,
       name: '[示例] 上传一份表格，我把清洗后的文件回给你',
       entryMode: SESSION_ENTRY_MODE_READ,
@@ -198,7 +198,7 @@ function getOwnerBootstrapSessionDefinitions() {
       ],
     },
     {
-      appId: BASIC_CHAT_APP_ID,
+      templateId: BASIC_CHAT_APP_ID,
       externalTriggerId: OWNER_BOOTSTRAP_DIGEST_SHOWCASE_EXTERNAL_TRIGGER_ID,
       name: '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
       entryMode: SESSION_ENTRY_MODE_READ,
@@ -231,7 +231,7 @@ function getOwnerBootstrapSessionDefinitions() {
       ],
     },
     {
-      appId: BASIC_CHAT_APP_ID,
+      templateId: BASIC_CHAT_APP_ID,
       externalTriggerId: OWNER_BOOTSTRAP_INSTANCE_EMAIL_EXTERNAL_TRIGGER_ID,
       name: '[示例] 发一封邮件到这个实例，会自动开一个新会话',
       entryMode: SESSION_ENTRY_MODE_READ,
@@ -272,7 +272,7 @@ function resolveBootstrapSessionEntryMode(session, definition) {
     return '';
   }
   if (
-    definition?.appId === WELCOME_APP_ID
+    definition?.templateId === WELCOME_APP_ID
     && typeof session?.welcomeOnboardingRetiredAt === 'string'
     && session.welcomeOnboardingRetiredAt.trim()
   ) {
@@ -371,29 +371,30 @@ async function buildMessageEvents(sessionId, messages = []) {
 }
 
 async function createOwnerBootstrapSession(definition, { appendLegacyWelcomeHint = false } = {}) {
-  const app = await getApp(definition.appId);
-  if (!app?.id) return null;
+  const template = await getApp(definition.templateId);
+  if (!template?.id) return null;
 
   const usePlainStarterSession = definition.externalTriggerId === OWNER_BOOTSTRAP_WELCOME_SESSION_EXTERNAL_TRIGGER_ID;
 
-  let session = await createSession('~', app.tool || 'codex', definition.name || app.name || 'Session', {
+  let session = await createSession('~', template.tool || 'codex', definition.name || template.name || 'Session', {
     sourceId: 'chat',
     sourceName: 'Chat',
     externalTriggerId: definition.externalTriggerId,
     ...(usePlainStarterSession
-      ? { systemPrompt: typeof app.systemPrompt === 'string' ? app.systemPrompt : '' }
-      : {
-          appId: app.id,
-          appName: app.name || '',
-        }),
+      ? {
+          systemPrompt: typeof template.systemPrompt === 'string' ? template.systemPrompt : '',
+          templateId: template.id,
+          templateName: template.name || '',
+        }
+      : {}),
   });
   if (!usePlainStarterSession) {
-    session = await applyAppTemplateToSession(session.id, app.id) || session;
+    session = await applyTemplateToSession(session.id, template.id) || session;
   }
   session = await getSession(session.id) || session;
 
   if (Number(session?.messageCount || 0) === 0) {
-    const starterMessages = getStarterMessagesForDefinition(definition, app);
+    const starterMessages = getStarterMessagesForDefinition(definition, template);
     const extraMessages = Array.isArray(definition.extraMessages) ? definition.extraMessages : [];
     const starterEvents = await buildMessageEvents(session.id, [...starterMessages, ...extraMessages]);
     if (starterEvents.length > 0) {

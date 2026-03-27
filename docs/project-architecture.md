@@ -64,7 +64,7 @@ Important product assumptions that shape the code:
 - **HTTP is the canonical state path**
 - **WebSocket is only an invalidation hint**
 - **filesystem-first persistence** is preferred over a database until proven necessary
-- **frontend stays minimal and endpoint-flexible** and agent-driven workflows are preferred over heavy UI orchestration
+- **frontend stays endpoint-flexible and protocol-light**, with explicit client state boundaries instead of hidden UI orchestration
 
 ---
 
@@ -84,9 +84,12 @@ Then branch by the change you need:
 - runtime / message execution → `chat/session-manager.mjs`, `chat/runs.mjs`, `chat/runner-sidecar.mjs`, `chat/adapters/*.mjs`
 - HTTP / API / role checks → `chat/router.mjs`, `lib/auth.mjs`, `chat/middleware.mjs`
 - UI / cross-endpoint behavior → `templates/chat.html`, `static/chat/`, `static/sw.js`
+- chat frontend state/render boundary → `docs/frontend-chat-architecture.md`
 - Apps / visitor flow → `chat/apps.mjs`, `chat/router.mjs`, `chat/session-manager.mjs`
 - session labeling / rename / grouping → `chat/summarizer.mjs`, `chat/session-naming.mjs`
-- memory activation / startup prompt → `chat/system-prompt.mjs`, `chat/shared-startup-defaults.mjs`, `notes/current/memory-activation-architecture.md`
+- memory activation / startup prompt → `chat/system-prompt.mjs`, `chat/shared-startup-defaults.mjs`, `chat/turn-context-hook.mjs`, `chat/prompt-assets/`, `notes/current/memory-activation-architecture.md`
+- manager / prompt / memory ownership model → `notes/current/model-sovereign-control-architecture.md`, `notes/current/prompt-layer-topology.md`, `notes/current/manager-policy-persistence.md`
+- manager/work-state projection → `chat/session-control-state.mjs`, `chat/history.mjs`, `notes/current/session-control-state-phase1.md`
 - provider/tool extensibility → `lib/tools.mjs`, `chat/models.mjs`, `notes/directional/provider-architecture.md`
 - external mail / webhook automation → `lib/agent-mailbox.mjs`, `lib/agent-mail-http-bridge.mjs`, `lib/agent-mail-completion-targets.mjs`, `scripts/agent-mail-*.mjs`
 
@@ -211,6 +214,8 @@ Responsible for rendering HTTP-derived state in an endpoint-flexible UI that wor
 
 Important: the frontend is **vanilla JS** with **no build step**.
 
+Use `docs/frontend-chat-architecture.md` for the file-level chat frontend boundary and state-ownership contract.
+
 ## 5. Repo map by concern
 
 ```text
@@ -231,8 +236,10 @@ remotelab/
 │   ├── settings.mjs                # user settings persistence
 │   ├── push.mjs                    # web push
 │   ├── ws.mjs / ws-clients.mjs     # invalidation-only realtime
-│   ├── system-prompt.mjs           # pointer-first memory instructions
+│   ├── system-prompt.mjs           # startup prompt assembly
+│   ├── turn-context-hook.mjs       # per-turn external context hook
 │   ├── shared-startup-defaults.mjs # removable shared startup defaults slice
+│   ├── prompt-assets/              # editable prompt text assets
 │   ├── session-continuation.mjs    # cross-turn / cross-tool handoff context
 │   ├── session-naming.mjs          # session title/group normalization helpers
 │   └── adapters/                   # CLI-output → normalized-events adapters
@@ -494,13 +501,17 @@ This is the most important flow in the current architecture.
 
 Prompt construction combines multiple layers:
 
-- pointer-first startup context from `chat/system-prompt.mjs` and `chat/shared-startup-defaults.mjs`
+- pointer-first startup context from `chat/system-prompt.mjs` + `chat/prompt-assets/`
+- removable shared startup slice from `chat/shared-startup-defaults.mjs`
+- per-turn external context hook from `chat/turn-context-hook.mjs`
 - app-level `systemPrompt` when the session came from an App
 - continuation context when resuming or switching tools
 - summary-head context from `context.json` after compaction
 - visitor-specific guardrail block for shared App sessions
 
 This is an important architectural decision: **session continuity is reconstructed from durable state, not from one immortal in-memory process**.
+
+This list describes the current shipped prompt assembly, not the full target ownership model. For the control-layer boundary where prompt should become a projection over manager state, memory activation, and durable work-state objects, see `notes/current/model-sovereign-control-architecture.md`.
 
 ### 8.5 Detached runner execution
 
@@ -829,8 +840,10 @@ Current implementation pieces:
 
 - `chat/system-prompt.mjs` prepends startup instructions for memory activation
 - `chat/shared-startup-defaults.mjs` carries a small removable cross-user startup slice that can be toggled without changing personal memory layout
+- `chat/turn-context-hook.mjs` injects a lightweight per-turn pointer block plus a stable writable context root
 - user-level memory lives under `~/.remotelab/memory/`
 - shared system memory lives in `memory/system.md`
+- the broader manager/prompt/memory ownership model is described in `notes/current/model-sovereign-control-architecture.md`
 
 The key architectural rule is:
 
@@ -872,7 +885,7 @@ Use this as the practical code-finding guide.
 | share snapshots | `chat/shares.mjs`, `chat/router.mjs`, `templates/chat.html`, `static/chat/` |
 | push notifications | `chat/push.mjs`, `static/sw.js`, `static/chat/` |
 | model/tool picker behavior | `lib/tools.mjs`, `chat/models.mjs`, `static/chat/` |
-| pointer-first memory startup | `chat/system-prompt.mjs`, `chat/shared-startup-defaults.mjs`, `notes/current/memory-activation-architecture.md` |
+| pointer-first memory startup | `chat/system-prompt.mjs`, `chat/shared-startup-defaults.mjs`, `chat/turn-context-hook.mjs`, `chat/prompt-assets/`, `notes/current/memory-activation-architecture.md` |
 | inbound/outbound mail automation | `lib/agent-mailbox.mjs`, `lib/agent-mail-http-bridge.mjs`, `lib/agent-mail-outbound.mjs`, `lib/agent-mail-completion-targets.mjs`, `scripts/agent-mail-*.mjs` |
 
 ---

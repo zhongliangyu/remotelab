@@ -32,7 +32,7 @@ For the current discovery phase:
 - Keep the active owner flow centered on the session list instead of preserving half-used planning surfaces.
 - If a richer workflow view returns later, it should return as a derived projection over sessions, not as the object that justifies the workflow model.
 
-This means the legacy board implementation was not something to refine in place during this phase. It was something to delete so the next interaction model could be designed more honestly from the session-first core.
+This means retired planning surfaces were not something to refine in place during this phase. They were something to delete so the next interaction model could be designed more honestly from the session-first core.
 
 ---
 
@@ -42,7 +42,7 @@ For the next product iteration:
 
 - do not preserve retired workflow surfaces just to avoid losing familiar UI vocabulary
 - do not let card/column vocabulary steer the main interaction model
-- do not treat the removed board as the central product risk during this rewrite
+- do not treat retired workflow surfaces as the central product risk during this rewrite
 - do use the session-first foundation to design the owner flow again from first principles
 
 ---

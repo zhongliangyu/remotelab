@@ -11,6 +11,8 @@ const DEFAULT_TOOL_ID = 'micro-agent';
 const DEFAULT_TOOL_NAME = 'Micro Agent';
 const DEFAULT_COMMAND = 'codex';
 const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_REASONING_LEVELS = ['low', 'medium', 'high', 'xhigh'];
+const DEFAULT_REASONING_LEVEL = 'medium';
 const PERSONAL_CODEX_CONFIG_PATH = join(HOME, '.codex', 'config.toml');
 const LEGACY_CONFIG_PATH = join(HOME, '.config', 'remotelab', 'micro-agent.json');
 
@@ -128,11 +130,14 @@ async function main() {
       {
         id: model,
         label: model,
+        defaultReasoning: DEFAULT_REASONING_LEVEL,
       },
     ],
     reasoning: {
-      kind: 'none',
+      kind: 'enum',
       label: 'Thinking',
+      levels: DEFAULT_REASONING_LEVELS,
+      default: DEFAULT_REASONING_LEVEL,
     },
   };
 
@@ -150,6 +155,7 @@ async function main() {
   console.log(`- Command: ${record.command}`);
   console.log(`- Runtime: ${record.runtimeFamily}`);
   console.log(`- Model: ${model}`);
+  console.log(`- Thinking default: ${DEFAULT_REASONING_LEVEL}`);
   if (await pathExists(LEGACY_CONFIG_PATH)) {
     console.log(`- Note: legacy config still exists at ${LEGACY_CONFIG_PATH} but is no longer used.`);
   }

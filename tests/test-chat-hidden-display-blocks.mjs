@@ -7,7 +7,7 @@ import vm from 'vm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const realtimeSource = readFileSync(join(repoRoot, 'static', 'chat', 'realtime.js'), 'utf8');
+const realtimeRenderSource = readFileSync(join(repoRoot, 'static', 'chat', 'realtime-render.js'), 'utf8');
 const uiSource = readFileSync(join(repoRoot, 'static', 'chat', 'ui.js'), 'utf8');
 
 function extractFunctionSource(source, functionName) {
@@ -44,11 +44,11 @@ function extractFunctionSource(source, functionName) {
   throw new Error(`Unable to extract ${functionName}`);
 }
 
-const stripHiddenDisplayBlocksSource = extractFunctionSource(realtimeSource, 'stripHiddenDisplayBlocks');
-const cleanBase64TextForDisplaySource = extractFunctionSource(realtimeSource, 'cleanBase64TextForDisplay');
-const looksLikeReadableDisplayTextSource = extractFunctionSource(realtimeSource, 'looksLikeReadableDisplayText');
-const tryDecodeUtf8Base64TextSource = extractFunctionSource(realtimeSource, 'tryDecodeUtf8Base64Text');
-const formatDecodedDisplayTextSource = extractFunctionSource(realtimeSource, 'formatDecodedDisplayText');
+const stripHiddenDisplayBlocksSource = extractFunctionSource(realtimeRenderSource, 'stripHiddenDisplayBlocks');
+const cleanBase64TextForDisplaySource = extractFunctionSource(realtimeRenderSource, 'cleanBase64TextForDisplay');
+const looksLikeReadableDisplayTextSource = extractFunctionSource(realtimeRenderSource, 'looksLikeReadableDisplayText');
+const tryDecodeUtf8Base64TextSource = extractFunctionSource(realtimeRenderSource, 'tryDecodeUtf8Base64Text');
+const formatDecodedDisplayTextSource = extractFunctionSource(realtimeRenderSource, 'formatDecodedDisplayText');
 const renderMarkdownIntoNodeSource = extractFunctionSource(uiSource, 'renderMarkdownIntoNode');
 
 const parsedInputs = [];

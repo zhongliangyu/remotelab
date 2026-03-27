@@ -12,6 +12,8 @@ const repoRoot = dirname(__dirname);
 const filesToParse = [
   join(repoRoot, 'static', 'chat.js'),
   join(repoRoot, 'static', 'chat', 'i18n.js'),
+  join(repoRoot, 'static', 'chat', 'session-store.js'),
+  join(repoRoot, 'static', 'chat', 'composer-store.js'),
   join(repoRoot, 'static', 'chat', 'bootstrap.js'),
   join(repoRoot, 'static', 'chat', 'bootstrap-session-catalog.js'),
   join(repoRoot, 'static', 'chat', 'layout-tooling.js'),
@@ -311,6 +313,8 @@ context.window.getComputedStyle = context.getComputedStyle;
 
 const orderedFiles = [
   'i18n.js',
+  'session-store.js',
+  'composer-store.js',
   'bootstrap.js',
   'bootstrap-session-catalog.js',
   'layout-tooling.js',

@@ -181,6 +181,15 @@ try {
     overflowHistory.some((event) => event.type === 'status' && /exceeded the model window/.test(event.content || '')),
     'overflow session should record the automatic fallback compaction status',
   );
+  const queuedCompactionEvent = overflowHistory.find(
+    (event) => event.type === 'context_operation' && event.operation === 'compact_context' && event.phase === 'queued',
+  );
+  assert.ok(
+    queuedCompactionEvent,
+    'overflow session should append a visible queued context operation for auto-compaction',
+  );
+  assert.equal(queuedCompactionEvent.operation, 'compact_context');
+  assert.equal(queuedCompactionEvent.trigger, 'automatic');
   assert.ok(
     overflowHistory.some((event) => event.type === 'context_barrier' && /no longer in the model's live context/i.test(event.content || '')),
     'overflow session should insert a visible context barrier after auto-compaction',
@@ -192,6 +201,20 @@ try {
   assert.ok(
     overflowHistory.some((event) => event.type === 'status' && /Auto Compress finished/.test(event.content || '')),
     'overflow session should record the successful compaction completion status',
+  );
+  const appliedCompactionEvent = overflowHistory.find(
+    (event) => event.type === 'context_operation' && event.operation === 'compact_context' && event.phase === 'applied',
+  );
+  assert.ok(
+    appliedCompactionEvent,
+    'overflow session should append a visible applied context operation after compaction succeeds',
+  );
+  assert.equal(appliedCompactionEvent.operation, 'compact_context');
+  assert.equal(appliedCompactionEvent.trigger, 'automatic');
+  assert.match(
+    appliedCompactionEvent.summary || '',
+    /continuation summary and handoff/i,
+    'applied context operation should describe the new carried-forward continuation state',
   );
 
   await waitFor(

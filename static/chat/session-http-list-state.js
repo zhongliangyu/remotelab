@@ -15,6 +15,7 @@ function applySessionListState(nextSessions, {
   const previousArchivedCount = Number.isInteger(archivedSessionCount) && archivedSessionCount >= 0
     ? archivedSessionCount
     : 0;
+  const previousCurrentSessionId = currentSessionId;
   const hadLoadedSessions = hasLoadedSessions === true;
   const previousSignature = typeof getComparableSessionStateSignature === "function"
     ? getComparableSessionStateSignature({ archivedCount: previousArchivedCount, sessions })
@@ -23,22 +24,20 @@ function applySessionListState(nextSessions, {
   const activeSessions = (Array.isArray(nextSessions) ? nextSessions : [])
     .map((session) => normalizeSessionRecord(session, previousMap.get(session?.id) || null))
     .filter(Boolean);
-  const preservedArchived = sessions
-    .filter((session) => session?.archived === true)
-    .map((session) => normalizeSessionRecord(session, previousMap.get(session?.id) || null))
-    .filter(Boolean);
-  const preservedCurrent = currentSessionId
-    ? normalizeSessionRecord(previousMap.get(currentSessionId) || null, previousMap.get(currentSessionId) || null)
-    : null;
-  sessions = mergeUniqueSessions([
-    ...activeSessions,
-    ...preservedArchived,
-    ...(preservedCurrent?.archived === true ? [preservedCurrent] : []),
-  ]);
-  sortSessionsInPlace();
-  hasLoadedSessions = true;
-  if (Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0) {
-    archivedSessionCount = nextArchivedCount;
+  if (typeof replaceActiveChatSessionsState === "function") {
+    replaceActiveChatSessionsState(activeSessions, {
+      archivedCount: Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0
+        ? nextArchivedCount
+        : archivedSessionCount,
+      compareSessions: typeof compareClientSessions === "function" ? compareClientSessions : null,
+    });
+  } else {
+    sessions = mergeUniqueSessions(activeSessions);
+    sortSessionsInPlace();
+    hasLoadedSessions = true;
+    if (Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0) {
+      archivedSessionCount = nextArchivedCount;
+    }
   }
   const nextSignature = typeof getComparableSessionStateSignature === "function"
     ? getComparableSessionStateSignature({ archivedCount: archivedSessionCount, sessions })
@@ -47,9 +46,7 @@ function applySessionListState(nextSessions, {
   if (!hadLoadedSessions || previousSignature !== nextSignature) {
     renderSessionList();
   }
-  if (currentSessionId && !sessions.some((session) => session.id === currentSessionId)) {
-    currentSessionId = null;
-    hasAttachedSession = false;
+  if (previousCurrentSessionId && !currentSessionId) {
     if (typeof resetAttachedSessionRenderState === "function") {
       resetAttachedSessionRenderState();
     }
@@ -71,20 +68,25 @@ function applyArchivedSessionListState(nextSessions, {
     ? getComparableSessionStateSignature({ archivedCount: previousArchivedCount, sessions })
     : "";
   const previousMap = new Map(sessions.map((session) => [session.id, session]));
-  const preservedActive = sessions
-    .filter((session) => session?.archived !== true)
-    .map((session) => normalizeSessionRecord(session, previousMap.get(session?.id) || null))
-    .filter(Boolean);
   const archivedSessions = (Array.isArray(nextSessions) ? nextSessions : [])
     .map((session) => normalizeSessionRecord(session, previousMap.get(session?.id) || null))
     .filter(Boolean);
-  sessions = mergeUniqueSessions([...preservedActive, ...archivedSessions]);
-  sortSessionsInPlace();
-  archivedSessionsLoaded = true;
-  archivedSessionsLoading = false;
-  archivedSessionCount = Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0
-    ? nextArchivedCount
-    : archivedSessions.length;
+  if (typeof replaceArchivedChatSessionsState === "function") {
+    replaceArchivedChatSessionsState(archivedSessions, {
+      archivedCount: Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0
+        ? nextArchivedCount
+        : archivedSessions.length,
+      compareSessions: typeof compareClientSessions === "function" ? compareClientSessions : null,
+    });
+  } else {
+    sessions = mergeUniqueSessions(archivedSessions);
+    sortSessionsInPlace();
+    archivedSessionsLoaded = true;
+    archivedSessionsLoading = false;
+    archivedSessionCount = Number.isInteger(nextArchivedCount) && nextArchivedCount >= 0
+      ? nextArchivedCount
+      : archivedSessions.length;
+  }
   const nextSignature = typeof getComparableSessionStateSignature === "function"
     ? getComparableSessionStateSignature({ archivedCount: archivedSessionCount, sessions })
     : "";

@@ -630,8 +630,6 @@ async function createEpisodeSession(runtime, trigger, episode, event) {
     folder: runtime.config.sessionFolder,
     tool: runtime.config.sessionTool,
     name: buildSessionName(trigger, event.detectedAt),
-    appId: runtime.config.appId,
-    appName: runtime.config.appName,
     sourceId: 'observer',
     sourceName: runtime.config.appName,
     group: runtime.config.group,

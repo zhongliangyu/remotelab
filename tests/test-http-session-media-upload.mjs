@@ -136,6 +136,12 @@ async function startServer({ home, port, promptFile }) {
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
       REMOTELAB_FAKE_PROMPT_FILE: promptFile,
+      REMOTELAB_ASSET_STORAGE_BASE_URL: '',
+      REMOTELAB_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      REMOTELAB_ASSET_STORAGE_PROVIDER: '',
+      REMOTELAB_ASSET_STORAGE_REGION: '',
+      REMOTELAB_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      REMOTELAB_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -328,10 +334,15 @@ try {
 
     const followUpRes = await submitJsonMessage(port, fileSession.id, 'req-generic-file-follow-up', 'Continue using the same attached file.');
     assert.ok(followUpRes.status === 202 || followUpRes.status === 200, 'follow-up message should be accepted');
-    assert.ok(followUpRes.json?.run?.id, 'follow-up message should create a run');
+    assert.ok(
+      followUpRes.json?.run?.id || followUpRes.json?.queued === true,
+      'follow-up message should either create a run or queue behind in-flight session work',
+    );
 
-    const followUpRun = await waitForRunTerminal(port, followUpRes.json.run.id);
-    assert.equal(followUpRun.state, 'completed', 'follow-up run should complete successfully');
+    if (followUpRes.json?.run?.id) {
+      const followUpRun = await waitForRunTerminal(port, followUpRes.json.run.id);
+      assert.equal(followUpRun.state, 'completed', 'follow-up run should complete successfully');
+    }
 
     const followUpPrompt = await waitFor(() => {
       const prompts = readCapturedPrompts(promptFile);

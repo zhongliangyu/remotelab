@@ -181,8 +181,6 @@ try {
     roomName: 'Living Room',
   }))
 
-  assert.equal(createPayload?.appId, 'observer-home')
-  assert.equal(createPayload?.appName, 'Home Coach')
   assert.equal(createPayload?.sourceId, 'observer')
   assert.equal(createPayload?.sourceName, 'Home Coach')
   assert.equal(createPayload?.group, 'Observer')

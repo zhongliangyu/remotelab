@@ -318,25 +318,51 @@ try {
     const managerRun = await waitForRunTerminal(port, submit.json.run.id);
     assert.equal(managerRun.state, 'completed', 'manager run should complete after spawning children');
 
+    const managerEvents = await waitFor(async () => {
+      const events = await getEvents(port, manager.id);
+      const operations = events.filter(
+        (event) => event.type === 'context_operation' && event.operation === 'delegate_session',
+      );
+      return operations.length === 3 ? events : false;
+    }, 'visible delegation operations on the manager session');
+    const delegationOperations = managerEvents.filter(
+      (event) => event.type === 'context_operation' && event.operation === 'delegate_session',
+    );
+    assert.equal(delegationOperations.length, 3, 'manager session should expose one visible delegation operation per spawned child');
+    assert.equal(
+      delegationOperations.every((event) => event.phase === 'applied' && event.trigger === 'delegation'),
+      true,
+      'delegation operations should be marked as applied delegation events',
+    );
+    const delegatedChildIds = delegationOperations
+      .map((event) => (typeof event.targetSessionId === 'string' ? event.targetSessionId : ''))
+      .filter(Boolean)
+      .sort();
+    assert.equal(delegatedChildIds.length, 3, 'manager should spawn exactly three parallel sessions');
+
     const sessions = await waitFor(async () => {
       const listed = await listSessions(port);
-      const children = listed.filter((entry) => entry.id !== manager.id);
-      return children.length === 3 ? listed : false;
-    }, 'three recursively spawned parallel sessions');
-    const childSessions = sessions.filter((entry) => entry.id !== manager.id);
-    assert.equal(childSessions.length, 3, 'manager should spawn exactly three parallel sessions');
+      const allDelegatedVisible = delegatedChildIds.every((id) => listed.some((entry) => entry.id === id));
+      return allDelegatedVisible ? listed : false;
+    }, 'delegated child sessions to become visible');
+    const childSessions = delegatedChildIds
+      .map((id) => sessions.find((entry) => entry.id === id))
+      .filter(Boolean);
+    assert.equal(childSessions.length, 3, 'delegated child sessions should all be visible in the session list');
 
-    const managerEvents = await getEvents(port, manager.id);
-    const managerReply = findLatestAssistantReply(managerEvents, submit.json.run.id);
+    const managerReply = [...managerEvents].reverse().find(
+      (event) => event.type === 'message'
+        && event.role === 'assistant'
+        && /spawned 3 parallel sessions/.test(event.content || ''),
+    );
     assert.ok(managerReply, 'manager run should record a final assistant reply');
     assert.match(managerReply.content || '', /spawned 3 parallel sessions/, 'manager reply should summarize the fan-out');
 
     const summaryPayload = JSON.parse((managerReply.content || '').split('\n').slice(1).join('\n').trim());
     assert.equal(summaryPayload.length, 3, 'manager reply should list all spawned runs');
 
-    const listedChildIds = childSessions.map((session) => session.id).sort();
     const repliedChildIds = summaryPayload.map((entry) => entry.sessionId).sort();
-    assert.deepEqual(repliedChildIds, listedChildIds, 'reply summary should match the actual spawned session ids');
+    assert.deepEqual(repliedChildIds, delegatedChildIds, 'reply summary should match the direct child sessions recorded on the manager');
 
     for (const childSummary of summaryPayload) {
       assert.equal(typeof childSummary.runId, 'string', 'each spawned session should report its run id');
@@ -356,8 +382,19 @@ try {
       assert.equal(childDetail.json.session?.effort, 'low', 'spawned session should inherit the pinned effort');
       assert.equal(childDetail.json.session?.delegatedFromSessionId, undefined, 'spawned session should stay independent');
 
-      const childEvents = await getEvents(port, childSummary.sessionId);
-      const childReply = findLatestAssistantReply(childEvents, childSummary.runId);
+      const childEvents = await waitFor(async () => {
+        const events = await getEvents(port, childSummary.sessionId);
+        return events.some(
+          (event) => event.type === 'message'
+            && event.role === 'assistant'
+            && /finished from fake codex/.test(event.content || ''),
+        ) ? events : false;
+      }, `visible child reply for ${childSummary.sessionId}`);
+      const childReply = [...childEvents].reverse().find(
+        (event) => event.type === 'message'
+          && event.role === 'assistant'
+          && /finished from fake codex/.test(event.content || ''),
+      );
       assert.match(childReply?.content || '', /finished from fake codex/, 'spawned session should still execute its own task');
     }
 

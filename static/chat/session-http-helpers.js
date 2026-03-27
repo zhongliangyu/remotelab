@@ -181,6 +181,9 @@ function resolveSessionEntryMode(value) {
 }
 
 function findClientSessionRecord(sessionId = currentSessionId) {
+  if (typeof getChatStoreSession === "function") {
+    return getChatStoreSession(sessionId);
+  }
   return typeof sessions !== "undefined" && Array.isArray(sessions)
     ? (sessions.find((session) => session?.id === sessionId) || null)
     : null;

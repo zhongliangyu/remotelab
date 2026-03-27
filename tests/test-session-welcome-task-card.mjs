@@ -102,7 +102,7 @@ async function waitFor(predicate, description, timeoutMs = 4000) {
 }
 
 const session = await createSession(tempHome, 'fake-codex', 'Welcome Intake', {
-  appId: WELCOME_APP_ID,
+  templateId: WELCOME_APP_ID,
   group: 'RemoteLab',
   description: 'Welcome app intake state should keep a hidden task card.',
 });

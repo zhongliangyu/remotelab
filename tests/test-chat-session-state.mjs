@@ -313,6 +313,86 @@ assert.equal(detachedRequestPayload?.url, '/api/sessions/session-origin/messages
 assert.equal(detachedCurrentRefreshes, 0, 'detached sends should not refresh the unrelated currently attached session');
 assert.equal(detachedSidebarRefreshes, 1, 'detached sends should refresh the origin session in the sidebar instead');
 
+const attachmentCompatContext = createBaseContext();
+let attachmentCompatPayload = null;
+
+attachmentCompatContext.currentSessionId = 'session-mobile-attachments';
+attachmentCompatContext.createRequestId = () => 'req-mobile-attachment';
+attachmentCompatContext.FormData = class MockFormData {
+  constructor() {
+    this.entries = [];
+  }
+
+  set(name, value) {
+    this.entries = this.entries.filter((entry) => entry.name !== name);
+    this.entries.push({ name, value, filename: null });
+  }
+
+  append(name, value, filename = null) {
+    this.entries.push({ name, value, filename });
+  }
+
+  getAll(name) {
+    return this.entries.filter((entry) => entry.name === name);
+  }
+};
+attachmentCompatContext.fetchSessionsList = async () => [];
+attachmentCompatContext.refreshCurrentSession = async () => ({ ok: true });
+attachmentCompatContext.refreshSidebarSession = async () => null;
+attachmentCompatContext.fetchJsonOrRedirect = async (url, options = {}) => {
+  attachmentCompatPayload = { url, options };
+  return {
+    queued: false,
+    session: {
+      id: 'session-mobile-attachments',
+      activity: createSessionActivity({ runState: 'running' }),
+    },
+  };
+};
+attachmentCompatContext.upsertSession = (value) => value;
+attachmentCompatContext.renderSessionList = () => {};
+attachmentCompatContext.applyAttachedSessionState = () => {};
+attachmentCompatContext.finalizeComposerPendingSend = () => true;
+attachmentCompatContext.savePendingMessage = () => {};
+attachmentCompatContext.clearPendingMessage = () => {};
+attachmentCompatContext.refreshSessionAttentionUi = () => {};
+attachmentCompatContext.setTimeout = () => 1;
+
+vm.runInNewContext(dispatchActionSnippet, attachmentCompatContext, {
+  filename: 'chat-dispatch-action-attachment-compat-runtime.js',
+});
+
+const mobileAttachmentAccepted = await attachmentCompatContext.dispatchAction({
+  action: 'send',
+  text: 'inspect this photo',
+  images: [{
+    file: {
+      name: 'mobile-photo.jpg',
+      type: 'image/jpeg',
+    },
+    originalName: 'mobile-photo.jpg',
+    mimeType: 'image/jpeg',
+  }],
+});
+assert.equal(mobileAttachmentAccepted, true, 'attachment sends should still succeed when the browser lacks File.arrayBuffer');
+assert.equal(attachmentCompatPayload?.url, '/api/sessions/session-mobile-attachments/messages', 'attachment sends should target the current session');
+assert.ok(
+  attachmentCompatPayload?.options?.body instanceof attachmentCompatContext.FormData,
+  'attachment sends should use multipart FormData whenever local files are present',
+);
+assert.deepEqual(
+  attachmentCompatPayload.options.body.getAll('attachments'),
+  [{
+    name: 'attachments',
+    value: {
+      name: 'mobile-photo.jpg',
+      type: 'image/jpeg',
+    },
+    filename: 'mobile-photo.jpg',
+  }],
+  'multipart attachment sends should append the original file object and filename',
+);
+
 const attachReuseContext = createBaseContext();
 let attachRefreshCalls = 0;
 let attachStateCalls = 0;

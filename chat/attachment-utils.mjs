@@ -62,7 +62,12 @@ export function formatAttachmentContextLine(images, label = 'Attached files') {
 export function stripAttachmentSavedPath(attachment) {
   if (!(attachment && typeof attachment === 'object')) return attachment;
   const { savedPath, ...rest } = attachment;
-  return rest;
+  const assetId = normalizeString(attachment?.assetId);
+  if (!assetId) {
+    return rest;
+  }
+  const { filename, ...assetBackedRest } = rest;
+  return assetBackedRest;
 }
 
 export function stripEventAttachmentSavedPaths(event) {

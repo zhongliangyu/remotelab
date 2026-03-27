@@ -359,7 +359,7 @@ v1 可以按两个维度判断：
 ## 暂不作为 headline 的方向
 
 - 一次用户请求扇出很多并发 session
-- 更重的项目管理 / board / hierarchy 抽象
+- 更重的项目管理 / hierarchy 抽象
 - 先做“超级个体工作台”的品牌叙事
 - 先做大而全的 no-code builder
 - 先把 workflow 分发当成第一增长故事

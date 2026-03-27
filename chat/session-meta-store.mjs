@@ -39,11 +39,6 @@ function normalizeStoredSessionSourceName(value) {
   return value.trim().replace(/\s+/g, ' ');
 }
 
-function isTemplateAppScopeId(appId) {
-  const normalized = normalizeAppId(appId);
-  return /^app[_-]/i.test(normalized);
-}
-
 function formatStoredSourceNameFromId(sourceId) {
   const normalized = typeof sourceId === 'string' ? sourceId.trim() : '';
   if (!normalized) return 'Chat';
@@ -56,9 +51,7 @@ function normalizeStoredSessionSourceFields(normalized) {
   let changed = false;
 
   const explicitSourceId = normalizeAppId(normalized.sourceId);
-  const legacyAppId = normalizeAppId(normalized.appId);
-  const nextSourceId = explicitSourceId
-    || (legacyAppId && !isTemplateAppScopeId(legacyAppId) ? legacyAppId : DEFAULT_APP_ID);
+  const nextSourceId = explicitSourceId || DEFAULT_APP_ID;
 
   if (normalized.sourceId !== nextSourceId) {
     normalized.sourceId = nextSourceId;
@@ -66,11 +59,7 @@ function normalizeStoredSessionSourceFields(normalized) {
   }
 
   const explicitSourceName = normalizeStoredSessionSourceName(normalized.sourceName);
-  const legacyAppName = normalizeStoredSessionSourceName(normalized.appName);
   let nextSourceName = explicitSourceName;
-  if (!nextSourceName && legacyAppName && legacyAppId && !isTemplateAppScopeId(legacyAppId) && legacyAppId === nextSourceId) {
-    nextSourceName = legacyAppName;
-  }
   if (!nextSourceName && nextSourceId !== DEFAULT_APP_ID) {
     const builtinSource = getBuiltinApp(nextSourceId);
     nextSourceName = builtinSource?.name || formatStoredSourceNameFromId(nextSourceId);
@@ -100,6 +89,13 @@ function normalizeStoredSessionMeta(meta) {
   for (const legacyField of ['activeRun', 'status', 'queuedMessageCount', 'pendingCompact', 'renameState', 'renameError', 'recoverable']) {
     if (Object.prototype.hasOwnProperty.call(normalized, legacyField)) {
       delete normalized[legacyField];
+      changed = true;
+    }
+  }
+
+  for (const derivedField of ['managerState', 'workState']) {
+    if (Object.prototype.hasOwnProperty.call(normalized, derivedField)) {
+      delete normalized[derivedField];
       changed = true;
     }
   }

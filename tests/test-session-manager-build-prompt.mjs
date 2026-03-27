@@ -48,18 +48,15 @@ const freshPrompt = await buildPrompt(
   { skipSessionContinuation: true },
 );
 
-assert.match(freshPrompt, /<private>[\s\S]*Manager note: RemoteLab remains the manager for this turn/);
+assert.match(freshPrompt, /<private>[\s\S]*lightweight external context hook/);
 assert.match(freshPrompt, /User message:/);
 assert.match(freshPrompt, /do not mirror its headings, bullets, or checklist structure back to the user/);
 assert.match(freshPrompt, /active working agreements/);
 assert.match(freshPrompt, /默认用自然连贯的段落表达，不要自己起标题和列表/);
-assert.match(freshPrompt, /current execution state, then whether the user is needed now or the work can stay parked/);
-assert.match(freshPrompt, /multi-goal routing as a first-order judgment/);
-assert.match(freshPrompt, /bounded work deserves bounded context/);
-assert.match(freshPrompt, /remotelab session-spawn --task "<focused task>" --wait --internal --output-mode final-only --json/);
-assert.match(freshPrompt, /remotelab assistant-message --text "Generated file attached\." --file "\.\/report\.pdf" --json/);
-assert.match(freshPrompt, /suppresses the visible parent handoff note and returns only the child session's final reply to stdout/);
-assert.match(freshPrompt, /REMOTELAB_RUN_ID/);
+assert.match(freshPrompt, /Stable context entry points:/);
+assert.match(freshPrompt, /Projects: ~\/\.remotelab\/memory\/projects\.md/);
+assert.match(freshPrompt, /Model-managed writable context root:/);
+assert.match(freshPrompt, /~\/\.remotelab\/memory\/model-context/);
 
 const resumedPrompt = await buildPrompt(
   'session-test-1',
@@ -74,7 +71,7 @@ const resumedPrompt = await buildPrompt(
   {},
 );
 
-assert.match(resumedPrompt, /<private>[\s\S]*Manager note: RemoteLab remains the manager for this turn/);
+assert.match(resumedPrompt, /<private>[\s\S]*lightweight external context hook/);
 assert.match(resumedPrompt, /Current user message:/);
 assert.doesNotMatch(resumedPrompt, /Memory System — Pointer-First Activation/);
 assert.match(resumedPrompt, /Agent 更像执行器，Manager 负责统一任务语义和边界/);
@@ -91,11 +88,9 @@ const splitPrompt = await buildPrompt(
   { skipSessionContinuation: true },
 );
 
-assert.match(splitPrompt, /Routing principle for this turn/);
-assert.match(splitPrompt, /Bounded work should prefer bounded context/);
-assert.match(splitPrompt, /Prefer splitting them into child sessions/);
-assert.match(splitPrompt, /1\. 现在都积压了哪些任务，我们看下接下来做什么/);
-assert.match(splitPrompt, /2\. 我们的 TODO 记录是标准流程吗，需不需要做一个定型/);
+assert.match(splitPrompt, /lightweight external context hook/);
+assert.match(splitPrompt, /Stable context entry points:/);
+assert.doesNotMatch(splitPrompt, /Routing principle for this turn/);
 
 const feishuSourcePrompt = await buildPrompt(
   'session-test-3',
@@ -163,7 +158,7 @@ const microAgentPrompt = await buildPrompt(
   { skipSessionContinuation: true },
 );
 
-assert.match(microAgentPrompt, /<private>[\s\S]*Manager note: RemoteLab remains the manager for this turn/);
+assert.match(microAgentPrompt, /<private>[\s\S]*lightweight external context hook/);
 assert.match(microAgentPrompt, /User message:/);
 assert.match(microAgentPrompt, /Memory System — Pointer-First Activation/);
 
@@ -195,7 +190,7 @@ const welcomePrompt = await buildPrompt(
   'session-test-8',
   {
     ...baseSession,
-    appId: 'app_welcome',
+    templateId: 'app_welcome',
     systemPrompt: 'WELCOME SYSTEM PROMPT',
   },
   '先帮我接住这个需求。',
@@ -211,7 +206,7 @@ const retiredWelcomePrompt = await buildPrompt(
   'session-test-9',
   {
     ...baseSession,
-    appId: 'app_welcome',
+    templateId: 'app_welcome',
     systemPrompt: 'WELCOME SYSTEM PROMPT',
     welcomeOnboardingRetiredAt: '2025-01-01T00:00:00.000Z',
   },

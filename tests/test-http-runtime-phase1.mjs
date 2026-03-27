@@ -98,6 +98,7 @@ function setupTempHome() {
     join(localBin, 'fake-codex'),
     `#!/usr/bin/env node
 const delay = Number(process.env.FAKE_CODEX_DELAY_MS || '700');
+const firstStepDelay = Math.max(50, Math.min(delay - 50, Math.floor(delay * 0.3)));
 let cancelled = false;
 process.on('SIGTERM', () => {
   cancelled = true;
@@ -111,6 +112,9 @@ setTimeout(() => {
     type: 'item.completed',
     item: { type: 'command_execution', command: 'echo fake', aggregated_output: 'fake', exit_code: 0, status: 'completed' }
   }));
+}, firstStepDelay);
+setTimeout(() => {
+  if (cancelled) return;
   console.log(JSON.stringify({
     type: 'item.completed',
     item: { type: 'agent_message', text: 'finished from fake codex' }
@@ -136,6 +140,7 @@ async function startServer({ home, port, delayMs = 700 }) {
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
       FAKE_CODEX_DELAY_MS: String(delayMs),
+      REMOTELAB_REPLY_SELF_CHECK: 'off',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -251,8 +256,11 @@ function readRunManifest(home, runId) {
   );
 }
 
-async function getEvents(port, sessionId) {
-  const res = await request(port, 'GET', `/api/sessions/${sessionId}/events`);
+async function getEvents(port, sessionId, filter = 'visible') {
+  const suffix = filter && filter !== 'visible'
+    ? `?filter=${encodeURIComponent(filter)}`
+    : '';
+  const res = await request(port, 'GET', `/api/sessions/${sessionId}/events${suffix}`);
   assert.equal(res.status, 200, 'events request should succeed');
   return res.json;
 }
@@ -395,14 +403,45 @@ async function phase5RestartSurvival() {
       return run.status === 200 && run.json.run.state === 'running';
     }, 'run should enter running state');
 
+    await waitFor(async () => {
+      const events = await getEvents(port, session.id, 'all');
+      return events.events.some((event) => event.type === 'tool_result' && event.output === 'fake');
+    }, 'running session should archive incremental tool output before terminal', 12000);
+
+    const beforeRestartEvents = await getEvents(port, session.id, 'all');
+    assert.ok(
+      beforeRestartEvents.events.some((event) => event.type === 'tool_result' && event.output === 'fake'),
+      'tool output should already be persisted to session history before restart',
+    );
+    assert.equal(
+      beforeRestartEvents.events.some((event) => event.type === 'message' && event.role === 'assistant' && event.content === 'finished from fake codex'),
+      false,
+      'final assistant message should not be committed before the delayed terminal output arrives',
+    );
+
     await stopServer(server);
     await sleep(500);
     server = await startServer({ home, port, delayMs: 1600 });
 
     const finalRun = await waitForRunTerminal(port, submit.json.run.id);
     assert.equal(finalRun.state, 'completed', 'detached run should survive restart');
-    const events = await getEvents(port, session.id);
+    const events = await getEvents(port, session.id, 'all');
     assert.ok(events.events.some((event) => event.type === 'message' && event.role === 'assistant'));
+
+    const toolResults = events.events.filter((event) => event.type === 'tool_result' && event.output === 'fake');
+    assert.equal(toolResults.length, 1, 'incrementally archived tool output should remain committed exactly once after restart');
+
+    const assistantMessages = events.events.filter(
+      (event) => event.type === 'message' && event.role === 'assistant' && event.content === 'finished from fake codex',
+    );
+    assert.equal(assistantMessages.length, 1, 'terminal assistant message should be committed exactly once after restart');
+
+    await waitFor(async () => {
+      const detail = await request(port, 'GET', `/api/sessions/${session.id}`);
+      if (detail.status !== 200) return false;
+      return detail.json.session?.activity?.run?.state === 'idle' && detail.json.session?.activeRunId === undefined;
+    }, 'session should clear active run metadata after terminal archival', 12000);
+
     console.log('phase5-restart-survival: ok');
   } finally {
     await stopServer(server);
@@ -785,6 +824,13 @@ async function phase13DelegateSession() {
     assert.doesNotMatch(manifest.prompt || '', /echo fake/, 'delegated prompt should omit intermediate tool details from the parent');
 
     const parentEvents = await getEvents(port, session.id);
+    const delegationOperation = parentEvents.events.find(
+      (event) => event.type === 'context_operation' && event.operation === 'delegate_session',
+    );
+    assert.ok(delegationOperation, 'delegation should append a visible context operation to the parent session');
+    assert.equal(delegationOperation.phase, 'applied', 'delegation context operation should report the applied phase');
+    assert.equal(delegationOperation.trigger, 'delegation', 'delegation context operation should identify the delegation trigger');
+    assert.match(delegationOperation.reason || '', /Figure out a lightweight child-session strategy for parallel work\./, 'delegation context operation should preserve the delegated task text');
     const delegateNotice = parentEvents.events.find((event) => event.type === 'message' && event.role === 'assistant' && event.messageKind === 'session_delegate_notice');
     assert.ok(delegateNotice, 'delegation should append a visible handoff note to the parent session');
     assert.match(delegateNotice.content || '', /Spawned a parallel session/, 'handoff note should describe the spawn');
@@ -842,6 +888,10 @@ async function phase14SessionSpawnCli() {
     assert.equal(payload.reply, 'finished from fake codex', 'CLI --wait should return the child assistant reply');
 
     const parentEvents = await getEvents(port, session.id);
+    const delegationOperation = parentEvents.events.find(
+      (event) => event.type === 'context_operation' && event.operation === 'delegate_session',
+    );
+    assert.ok(delegationOperation, 'CLI helper should append a visible delegation context operation to the source session');
     const delegateNotice = parentEvents.events.find((event) => event.type === 'message' && event.role === 'assistant' && event.messageKind === 'session_delegate_notice');
     assert.ok(delegateNotice, 'CLI helper should still append a visible handoff note to the source session');
 
@@ -879,6 +929,10 @@ async function phase14bSessionSpawnCliInternalFinalOnly() {
     }, 'internal final-only CLI should return only the terminal child reply payload');
 
     const parentEvents = await getEvents(port, session.id);
+    const delegationOperation = parentEvents.events.find(
+      (event) => event.type === 'context_operation' && event.operation === 'delegate_session',
+    );
+    assert.equal(delegationOperation, undefined, 'internal final-only helper should not append a visible delegation context operation to the source session');
     const delegateNotice = parentEvents.events.find((event) => event.type === 'message' && event.role === 'assistant' && event.messageKind === 'session_delegate_notice');
     assert.equal(delegateNotice, undefined, 'internal final-only helper should not append a visible handoff note to the source session');
 
@@ -933,14 +987,17 @@ async function phase15NoDuplicateDuringReadHammer() {
     assert.equal(fullEvents.status, 200, 'full event list should load after the read hammer');
 
     const assistantMessages = (fullEvents.json?.events || []).filter(
-      (event) => event.type === 'message' && event.role === 'assistant' && event.content === 'finished from fake codex',
+      (event) => event.type === 'message'
+        && event.role === 'assistant'
+        && event.runId === submit.json.run.id
+        && event.content === 'finished from fake codex',
     );
-    assert.equal(assistantMessages.length, 1, 'final assistant message should be committed exactly once');
+    assert.equal(assistantMessages.length, 1, 'final assistant message for the original run should be committed exactly once');
 
     const toolResults = (fullEvents.json?.events || []).filter(
-      (event) => event.type === 'tool_result' && event.output === 'fake',
+      (event) => event.type === 'tool_result' && event.runId === submit.json.run.id && event.output === 'fake',
     );
-    assert.equal(toolResults.length, 1, 'tool result should be committed exactly once');
+    assert.equal(toolResults.length, 1, 'tool result for the original run should be committed exactly once');
 
     console.log('phase15-no-duplicate-during-read-hammer: ok');
   } finally {

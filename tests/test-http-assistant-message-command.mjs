@@ -168,6 +168,12 @@ async function startServer({ home, port }) {
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
+      REMOTELAB_ASSET_STORAGE_BASE_URL: '',
+      REMOTELAB_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      REMOTELAB_ASSET_STORAGE_PROVIDER: '',
+      REMOTELAB_ASSET_STORAGE_REGION: '',
+      REMOTELAB_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      REMOTELAB_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

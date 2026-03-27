@@ -121,6 +121,13 @@ async function fetchAllEvents(cookie, sessionId) {
   return fetchJson(cookie, `/api/sessions/${sessionId}/events`);
 }
 
+function getMaxEventSeq(events) {
+  if (!Array.isArray(events) || events.length === 0) return 0;
+  return events.reduce((maxSeq, event) => (
+    Number.isInteger(event?.seq) && event.seq > maxSeq ? event.seq : maxSeq
+  ), 0);
+}
+
 async function fetchEventBody(cookie, sessionId, seq) {
   const data = await fetchJson(cookie, `/api/sessions/${sessionId}/events/${seq}/body`);
   return data.body?.value || '';
@@ -132,6 +139,28 @@ async function resolveMessageContent(cookie, sessionId, event) {
   if (typeof event.content === 'string' && event.content) return event.content;
   if (!event.bodyAvailable || !Number.isInteger(event.seq)) return '';
   return fetchEventBody(cookie, sessionId, event.seq);
+}
+
+async function waitForAssistantReplyAfter(cookie, sessionId, afterSeq = 0) {
+  return waitFor(async () => {
+    const data = await fetchAllEvents(cookie, sessionId);
+    const reply = [...(data.events || [])]
+      .reverse()
+      .find((event) => (
+        event.type === 'message'
+        && event.role === 'assistant'
+        && Number.isInteger(event.seq)
+        && event.seq > afterSeq
+      ));
+    if (!reply) return null;
+    const content = await resolveMessageContent(cookie, sessionId, reply);
+    if (!content) return null;
+    return {
+      content,
+      events: data.events || [],
+      reply,
+    };
+  }, `assistant reply after seq ${afterSeq}`);
 }
 
 async function main() {
@@ -172,27 +201,27 @@ async function main() {
   if (!session?.id) fail('No session created');
 
   log('test', 'Step 4: Sending first message via HTTP...');
+  const eventsBeforeFirst = await fetchAllEvents(cookie, session.id);
+  const firstBaselineSeq = getMaxEventSeq(eventsBeforeFirst.events);
   const first = await sendMessage(cookie, session.id, '记住这个数字：42。只回复“已记住”。');
-  await waitForRun(cookie, first.run.id);
-
-  const firstEvents = await fetchAllEvents(cookie, session.id);
-  const firstReply = [...(firstEvents.events || [])]
-    .reverse()
-    .find((event) => event.type === 'message' && event.role === 'assistant');
-  const firstReplyContent = await resolveMessageContent(cookie, session.id, firstReply);
+  if (first.run?.id) {
+    await waitForRun(cookie, first.run.id);
+  }
+  const firstTurn = await waitForAssistantReplyAfter(cookie, session.id, firstBaselineSeq);
+  const firstEvents = { events: firstTurn.events };
+  const firstReplyContent = firstTurn.content;
   if (!firstReplyContent) fail('No assistant reply found after first message');
   log('test', `First reply: ${firstReplyContent.slice(0, 120)}`);
   pass('First message got a response');
 
   log('test', 'Step 5: Sending follow-up context test via HTTP...');
+  const secondBaselineSeq = getMaxEventSeq(firstEvents.events);
   const second = await sendMessage(cookie, session.id, '我让你记住的数字是什么？只回复那个数字本身。');
-  await waitForRun(cookie, second.run.id);
-
-  const secondEvents = await fetchAllEvents(cookie, session.id);
-  const secondReply = [...(secondEvents.events || [])]
-    .reverse()
-    .find((event) => event.type === 'message' && event.role === 'assistant');
-  const secondReplyContent = await resolveMessageContent(cookie, session.id, secondReply);
+  if (second.run?.id) {
+    await waitForRun(cookie, second.run.id);
+  }
+  const secondTurn = await waitForAssistantReplyAfter(cookie, session.id, secondBaselineSeq);
+  const secondReplyContent = secondTurn.content;
   if (!secondReplyContent) fail('No assistant reply found after second message');
   log('test', `Second reply: ${secondReplyContent.slice(0, 120)}`);
 
@@ -210,15 +239,15 @@ async function main() {
   await patchJson(cookie, `/api/sessions/${session.id}`, { name: 'HTTP integration renamed' });
   const archived = await patchJson(cookie, `/api/sessions/${session.id}`, { archived: true });
   if (!archived.session?.archived) fail('Archive flag was not applied');
-  const listedArchived = await fetchJson(cookie, '/api/sessions');
+  const listedArchived = await fetchJson(cookie, '/api/sessions/archived');
   const archivedEntry = (listedArchived.sessions || []).find((item) => item.id === session.id);
-  if (!archivedEntry) fail('Archived session disappeared from session list');
-  if (!archivedEntry.archived) fail('Session list did not expose archived flag');
+  if (!archivedEntry) fail('Archived session did not appear in archived session list');
+  if (!archivedEntry.archived) fail('Archived session list did not expose archived flag');
   const restored = await patchJson(cookie, `/api/sessions/${session.id}`, { archived: false });
   if (restored.session?.archived) fail('Archive flag was not cleared');
   const listedRestored = await fetchJson(cookie, '/api/sessions');
   const restoredEntry = (listedRestored.sessions || []).find((item) => item.id === session.id);
-  if (!restoredEntry) fail('Restored session disappeared from session list');
+  if (!restoredEntry) fail('Restored session did not return to active session list');
   if (restoredEntry.archived) fail('Session list did not clear archived flag after restore');
 
   ws.close();

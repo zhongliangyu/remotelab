@@ -185,6 +185,8 @@ async function main() {
     assert.ok(bootstrapMatch, 'chat page should inline bootstrap payload');
     const bootstrap = JSON.parse(bootstrapMatch[1]);
     assert.deepEqual(bootstrap.auth, { role: 'owner' }, 'bootstrap payload should include owner auth');
+    assert.match(page.text, /<script src="\/chat\/session-store\.js(?:\?v=[^"]*)?"/);
+    assert.match(page.text, /<script src="\/chat\/composer-store\.js(?:\?v=[^"]*)?"/);
     assert.match(page.text, /<script src="\/chat\/bootstrap\.js(?:\?v=[^"]*)?"/);
     assert.match(page.text, /<script src="\/chat\/bootstrap-session-catalog\.js(?:\?v=[^"]*)?"/);
     assert.match(page.text, /<script src="\/chat\/session-http-helpers\.js(?:\?v=[^"]*)?"/);
@@ -225,8 +227,6 @@ async function main() {
     assert.doesNotMatch(page.text, /id="userFilterSelect"/);
     assert.match(page.text, /id="sortSessionListBtn"/);
     assert.match(page.text, /id="settingsSessionPresentationList"/);
-    assert.doesNotMatch(page.text, /id="tabBoard"/);
-    assert.doesNotMatch(page.text, /id="boardPanel"/);
     assert.doesNotMatch(page.text, /id="settingsUsersList"/);
     assert.doesNotMatch(page.text, /id="settingsAppsList"/);
     assert.doesNotMatch(page.text, /id="newUserNameInput"/);
@@ -400,6 +400,12 @@ async function main() {
 
     const sessionHttpAsset = await request(port, 'GET', '/chat/session-http.js');
     assert.equal(sessionHttpAsset.status, 200, 'session http asset should load');
+    const sessionStoreAsset = await request(port, 'GET', '/chat/session-store.js');
+    assert.equal(sessionStoreAsset.status, 200, 'session store asset should load');
+    assert.match(sessionStoreAsset.text, /RemoteLabChatStore/);
+    const composerStoreAsset = await request(port, 'GET', '/chat/composer-store.js');
+    assert.equal(composerStoreAsset.status, 200, 'composer store asset should load');
+    assert.match(composerStoreAsset.text, /RemoteLabComposerStore/);
     const bootstrapCatalogAsset = await request(port, 'GET', '/chat/bootstrap-session-catalog.js');
     assert.equal(bootstrapCatalogAsset.status, 200, 'bootstrap session catalog asset should load');
     assert.match(bootstrapCatalogAsset.text, /function getEffectiveSessionSourceId\(/);
@@ -427,6 +433,22 @@ async function main() {
       versionedBootstrapCatalogAsset.headers['cache-control'],
       'public, max-age=31536000, immutable',
       'versioned bootstrap session catalog asset should be immutable cache hits',
+    );
+
+    const versionedSessionStoreAsset = await request(port, 'GET', '/chat/session-store.js?v=test-build');
+    assert.equal(versionedSessionStoreAsset.status, 200, 'versioned session store asset should load');
+    assert.equal(
+      versionedSessionStoreAsset.headers['cache-control'],
+      'public, max-age=31536000, immutable',
+      'versioned session store asset should be immutable cache hits',
+    );
+
+    const versionedComposerStoreAsset = await request(port, 'GET', '/chat/composer-store.js?v=test-build');
+    assert.equal(versionedComposerStoreAsset.status, 200, 'versioned composer store asset should load');
+    assert.equal(
+      versionedComposerStoreAsset.headers['cache-control'],
+      'public, max-age=31536000, immutable',
+      'versioned composer store asset should be immutable cache hits',
     );
 
     const versionedSessionHttpHelpersAsset = await request(port, 'GET', '/chat/session-http-helpers.js?v=test-build');
@@ -486,6 +508,26 @@ async function main() {
     );
     assert.ok(stateModelAsset.headers.etag, 'session state model asset should expose an ETag');
     assert.match(stateModelAsset.text, /RemoteLabSessionStateModel/);
+
+    const sessionStoreModelAsset = await request(port, 'GET', '/chat/session-store.js');
+    assert.equal(sessionStoreModelAsset.status, 200, 'session store model asset should load');
+    assert.equal(
+      sessionStoreModelAsset.headers['cache-control'],
+      'public, no-cache, max-age=0, must-revalidate',
+      'session store model should use safe revalidation caching',
+    );
+    assert.ok(sessionStoreModelAsset.headers.etag, 'session store model asset should expose an ETag');
+    assert.match(sessionStoreModelAsset.text, /RemoteLabChatStore/);
+
+    const composerStoreModelAsset = await request(port, 'GET', '/chat/composer-store.js');
+    assert.equal(composerStoreModelAsset.status, 200, 'composer store model asset should load');
+    assert.equal(
+      composerStoreModelAsset.headers['cache-control'],
+      'public, no-cache, max-age=0, must-revalidate',
+      'composer store model should use safe revalidation caching',
+    );
+    assert.ok(composerStoreModelAsset.headers.etag, 'composer store model asset should expose an ETag');
+    assert.match(composerStoreModelAsset.text, /RemoteLabComposerStore/);
 
     const layoutToolingAsset = await request(port, 'GET', '/chat/layout-tooling.js');
     assert.equal(layoutToolingAsset.status, 200, 'layout tooling asset should load');
