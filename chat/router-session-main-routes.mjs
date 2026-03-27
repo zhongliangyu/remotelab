@@ -66,6 +66,7 @@ export async function handleSessionMainRoutes({
       includeArchived: true,
       templateId: typeof parsedUrl.query.templateId === 'string' ? parsedUrl.query.templateId : '',
       sourceId: typeof parsedUrl.query.sourceId === 'string' ? parsedUrl.query.sourceId : '',
+      workspaceId: typeof parsedUrl.query.workspaceId === 'string' ? parsedUrl.query.workspaceId : '',
     });
     const folderFilter = parsedUrl.query.folder;
     const filtered = folderFilter

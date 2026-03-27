@@ -96,6 +96,13 @@ function getCurrentWorkspace() {
 }
 
 /**
+ * Get current workspace ID
+ */
+function getCurrentWorkspaceId() {
+  return currentWorkspaceId || 'default';
+}
+
+/**
  * Get default folder for current workspace
  */
 function getCurrentWorkspaceDefaultFolder() {

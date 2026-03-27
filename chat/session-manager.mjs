@@ -2339,17 +2339,22 @@ export async function listSessions({
   includeArchived = true,
   templateId = '',
   sourceId = '',
+  workspaceId = '',
   includeQueuedMessages = false,
 } = {}) {
   const metas = await loadSessionsMeta();
   const normalizedTemplateId = normalizeAppId(templateId);
   const normalizedSourceId = normalizeAppId(sourceId);
+  const normalizedWorkspaceId = typeof workspaceId === 'string' && workspaceId.trim()
+    ? workspaceId.trim()
+    : '';
   const filtered = metas
     .filter((meta) => includeVisitor || !meta.visitorId)
     .filter((meta) => shouldExposeSession(meta))
     .filter((meta) => includeArchived || !meta.archived)
     .filter((meta) => !normalizedTemplateId || resolveSessionTemplateId(meta) === normalizedTemplateId)
     .filter((meta) => !normalizedSourceId || resolveSessionSourceId(meta) === normalizedSourceId)
+    .filter((meta) => !normalizedWorkspaceId || (meta.workspaceId || 'default') === normalizedWorkspaceId)
     .sort((a, b) => {
       const sidebarOrderA = normalizeSessionSidebarOrder(a?.sidebarOrder);
       const sidebarOrderB = normalizeSessionSidebarOrder(b?.sidebarOrder);
@@ -2428,6 +2433,9 @@ export async function createSession(folder, tool, name, extra = {}) {
   const requestedUserName = normalizeSessionUserName(extra.userName);
   const requestedGroup = normalizeSessionGroup(extra.group || '');
   const requestedDescription = normalizeSessionDescription(extra.description || '');
+  const requestedWorkspaceId = typeof extra.workspaceId === 'string' && extra.workspaceId.trim()
+    ? extra.workspaceId.trim()
+    : 'default';
   const hasRequestedSystemPrompt = Object.prototype.hasOwnProperty.call(extra, 'systemPrompt');
   const requestedSystemPrompt = typeof extra.systemPrompt === 'string' ? extra.systemPrompt : '';
   const hasRequestedModel = Object.prototype.hasOwnProperty.call(extra, 'model');
@@ -2622,6 +2630,7 @@ export async function createSession(folder, tool, name, extra = {}) {
     if (requestedModel) session.model = requestedModel;
     if (requestedEffort) session.effort = requestedEffort;
     if (requestedThinking) session.thinking = true;
+    if (requestedWorkspaceId && requestedWorkspaceId !== 'default') session.workspaceId = requestedWorkspaceId;
     if (extra.internalRole) session.internalRole = extra.internalRole;
     if (extra.compactsSessionId) session.compactsSessionId = extra.compactsSessionId;
     if (externalTriggerId) session.externalTriggerId = externalTriggerId;

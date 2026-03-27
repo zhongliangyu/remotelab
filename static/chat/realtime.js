@@ -99,6 +99,7 @@ async function dispatchAction(msg) {
             folder: msg.folder || "~",
             tool: msg.tool,
             name: msg.name || "",
+            workspaceId: msg.workspaceId || "",
             sourceId: msg.sourceId || "",
             sourceName: msg.sourceName || "",
           }),

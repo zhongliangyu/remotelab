@@ -154,6 +154,22 @@ function normalizeStoredSessionMeta(meta) {
     }
   }
 
+  // Normalize workspaceId - defaults to 'default' if not specified
+  if (Object.prototype.hasOwnProperty.call(normalized, 'workspaceId')) {
+    const nextWorkspaceId = typeof normalized.workspaceId === 'string' && normalized.workspaceId.trim()
+      ? normalized.workspaceId.trim()
+      : null;
+    if (nextWorkspaceId) {
+      if (normalized.workspaceId !== nextWorkspaceId) {
+        normalized.workspaceId = nextWorkspaceId;
+        changed = true;
+      }
+    } else {
+      delete normalized.workspaceId;
+      changed = true;
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalized, 'entryMode')) {
     const nextEntryMode = normalizeSessionEntryMode(normalized.entryMode);
     if (nextEntryMode) {

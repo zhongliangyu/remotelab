@@ -732,8 +732,14 @@ async function updateSessionRecord(sessionId, payload = {}) {
 
 async function fetchSessionsList({ forceFresh = false } = {}) {
   if (visitorMode) return [];
+  const workspaceId = typeof getCurrentWorkspaceId === 'function'
+    ? getCurrentWorkspaceId()
+    : 'default';
+  const url = workspaceId && workspaceId !== 'default'
+    ? `${SESSION_LIST_URL}?workspaceId=${encodeURIComponent(workspaceId)}`
+    : SESSION_LIST_URL;
   const data = await fetchJsonOrRedirect(
-    SESSION_LIST_URL,
+    url,
     buildSessionRefreshRequestOptions(forceFresh),
   );
   applySessionListState(data.sessions || [], {

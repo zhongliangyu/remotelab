@@ -21,8 +21,11 @@ function openSessionsSidebar() {
 // ---- New Session Modal ----
 function openNewSessionModal() {
   if (!newSessionModal) return;
+  const defaultFolder = typeof getCurrentWorkspaceDefaultFolder === 'function'
+    ? getCurrentWorkspaceDefaultFolder()
+    : '~';
   newSessionModal.hidden = false;
-  newSessionFolderInput.value = "~";
+  newSessionFolderInput.value = defaultFolder;
   newSessionFolderSuggestions.innerHTML = "";
   newSessionNameInput.value = "";
   populateNewSessionToolSelect();
@@ -61,6 +64,9 @@ async function handleCreateNewSession() {
   const folder = newSessionFolderInput?.value?.trim() || "~";
   const tool = newSessionToolSelect?.value || preferredTool || selectedTool || toolsList[0]?.id;
   const name = newSessionNameInput?.value?.trim() || "";
+  const workspaceId = typeof getCurrentWorkspaceId === 'function'
+    ? getCurrentWorkspaceId()
+    : 'default';
   if (!tool) return;
 
   closeNewSessionModal();
@@ -74,6 +80,7 @@ async function handleCreateNewSession() {
     folder,
     tool,
     name,
+    workspaceId,
     sourceId: DEFAULT_APP_ID,
     sourceName: DEFAULT_APP_NAME,
   });
