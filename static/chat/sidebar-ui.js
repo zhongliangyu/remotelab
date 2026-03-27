@@ -18,25 +18,126 @@ function openSessionsSidebar() {
   return true;
 }
 
-function createNewSessionShortcut({ closeSidebar = true } = {}) {
-  if (closeSidebar && !isDesktop) closeSidebarFn();
-  const tool = preferredTool || selectedTool || toolsList[0]?.id;
-  if (!tool) return false;
+// ---- New Session Modal ----
+function openNewSessionModal() {
+  if (!newSessionModal) return;
+  newSessionModal.hidden = false;
+  newSessionFolderInput.value = "~";
+  newSessionFolderSuggestions.innerHTML = "";
+  newSessionNameInput.value = "";
+  populateNewSessionToolSelect();
+  newSessionFolderInput.focus();
+}
+
+function closeNewSessionModal() {
+  if (!newSessionModal) return;
+  newSessionModal.hidden = true;
+}
+
+function populateNewSessionToolSelect() {
+  if (!newSessionToolSelect) return;
+  const toolOptions = Array.isArray(toolsList) ? toolsList : [];
+  const preferredValue = preferredTool || selectedTool || toolOptions[0]?.id || "";
+  newSessionToolSelect.innerHTML = "";
+  if (toolOptions.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = t("modal.noTools");
+    newSessionToolSelect.appendChild(option);
+    newSessionToolSelect.disabled = true;
+    return;
+  }
+  toolOptions.forEach((tool) => {
+    const option = document.createElement("option");
+    option.value = tool.id || "";
+    option.textContent = tool.label || tool.id || "";
+    if (tool.id === preferredValue) option.selected = true;
+    newSessionToolSelect.appendChild(option);
+  });
+  newSessionToolSelect.disabled = false;
+}
+
+async function handleCreateNewSession() {
+  const folder = newSessionFolderInput?.value?.trim() || "~";
+  const tool = newSessionToolSelect?.value || preferredTool || selectedTool || toolsList[0]?.id;
+  const name = newSessionNameInput?.value?.trim() || "";
+  if (!tool) return;
+
+  closeNewSessionModal();
+  if (!isDesktop) closeSidebarFn();
   if (typeof switchTab === "function") {
     switchTab("sessions");
   }
+
   return dispatchAction({
     action: "create",
-    folder: "~",
+    folder,
     tool,
+    name,
     sourceId: DEFAULT_APP_ID,
     sourceName: DEFAULT_APP_NAME,
   });
 }
 
+// Folder autocomplete
+let folderAcTimer = null;
+function setupFolderAutocomplete() {
+  if (!newSessionFolderInput || !newSessionFolderSuggestions) return;
+  newSessionFolderInput.addEventListener("input", () => {
+    clearTimeout(folderAcTimer);
+    folderAcTimer = setTimeout(async () => {
+      const q = newSessionFolderInput.value.trim();
+      if (q.length < 2) {
+        newSessionFolderSuggestions.innerHTML = "";
+        return;
+      }
+      try {
+        const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        newSessionFolderSuggestions.innerHTML = "";
+        for (const s of (data.suggestions || []).slice(0, 5)) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = s.replace(/^\/Users\/[^/]+/, "~");
+          btn.onclick = () => {
+            newSessionFolderInput.value = s;
+            newSessionFolderSuggestions.innerHTML = "";
+          };
+          newSessionFolderSuggestions.appendChild(btn);
+        }
+      } catch {}
+    }, 200);
+  });
+}
+
+function createNewSessionShortcut({ closeSidebar = true } = {}) {
+  openNewSessionModal();
+  return true;
+}
+
 function createSortSessionListShortcut() {
   return organizeSessionListWithAgent({ closeSidebar: false });
 }
+
+// Modal event listeners
+if (newSessionBtn) {
+  newSessionBtn.addEventListener("click", openNewSessionModal);
+}
+if (closeNewSessionModalBtn) {
+  closeNewSessionModalBtn.addEventListener("click", closeNewSessionModal);
+}
+if (cancelNewSessionModalBtn) {
+  cancelNewSessionModalBtn.addEventListener("click", closeNewSessionModal);
+}
+if (newSessionModal) {
+  newSessionModal.addEventListener("click", (e) => {
+    if (e.target === newSessionModal) closeNewSessionModal();
+  });
+}
+if (createNewSessionBtn) {
+  createNewSessionBtn.addEventListener("click", handleCreateNewSession);
+}
+setupFolderAutocomplete();
 
 menuBtn.addEventListener("click", openSessionsSidebar);
 closeSidebar.addEventListener("click", closeSidebarFn);
@@ -47,10 +148,6 @@ sidebarOverlay.addEventListener("click", (e) => {
 // ---- Session list actions ----
 sortSessionListBtn.addEventListener("click", () => {
   void createSortSessionListShortcut();
-});
-
-newSessionBtn.addEventListener("click", () => {
-  createNewSessionShortcut();
 });
 
 // ---- Attachment handling ----

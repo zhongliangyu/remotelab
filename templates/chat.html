@@ -132,6 +132,35 @@
 
 <div class="gesture-pill" id="gesturePill" aria-hidden="true"></div>
 
+<!-- New Session Modal -->
+<div class="modal-backdrop" id="newSessionModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newSessionModalTitle">
+    <div class="modal-header">
+      <div class="modal-title" id="newSessionModalTitle" data-i18n="modal.newSessionTitle">New Session</div>
+      <button class="modal-close" id="closeNewSessionModal" type="button" aria-label="Close" data-i18n-aria-label="action.close" data-icon="close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="provider-helper-field">
+        <label for="newSessionFolderInput" data-i18n="modal.folder">Project Path</label>
+        <input type="text" id="newSessionFolderInput" placeholder="/path/to/project" autocomplete="off" data-i18n-placeholder="modal.folderPlaceholder">
+        <div class="ac-suggestions" id="newSessionFolderSuggestions"></div>
+      </div>
+      <div class="provider-helper-field">
+        <label for="newSessionToolSelect" data-i18n="modal.tool">Agent</label>
+        <select id="newSessionToolSelect"></select>
+      </div>
+      <div class="provider-helper-field">
+        <label for="newSessionNameInput" data-i18n="modal.sessionName">Name <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+        <input type="text" id="newSessionNameInput" placeholder="e.g. Fix auth bug" autocomplete="off" data-i18n-placeholder="modal.sessionNamePlaceholder">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn" id="cancelNewSessionModal" type="button" data-i18n="modal.cancel">Cancel</button>
+      <button class="modal-btn primary" id="createNewSessionBtn" type="button" data-i18n="modal.create">Create</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="addToolModal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addToolModalTitle">
     <div class="modal-header">

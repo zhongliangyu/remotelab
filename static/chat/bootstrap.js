@@ -285,6 +285,14 @@ const addToolStatus = document.getElementById("addToolStatus");
 const providerPromptCode = document.getElementById("providerPromptCode");
 const saveToolConfigBtn = document.getElementById("saveToolConfigBtn");
 const copyProviderPromptBtn = document.getElementById("copyProviderPromptBtn");
+const newSessionModal = document.getElementById("newSessionModal");
+const closeNewSessionModalBtn = document.getElementById("closeNewSessionModal");
+const cancelNewSessionModalBtn = document.getElementById("cancelNewSessionModal");
+const createNewSessionBtn = document.getElementById("createNewSessionBtn");
+const newSessionFolderInput = document.getElementById("newSessionFolderInput");
+const newSessionFolderSuggestions = document.getElementById("newSessionFolderSuggestions");
+const newSessionToolSelect = document.getElementById("newSessionToolSelect");
+const newSessionNameInput = document.getElementById("newSessionNameInput");
 
 refreshFrontendBtn?.addEventListener("click", () => {
   void reloadForFreshBuild(newerBuildInfo);
