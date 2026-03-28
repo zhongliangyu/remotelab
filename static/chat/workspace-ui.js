@@ -135,7 +135,11 @@ async function initWorkspaceUi() {
   }
 }
 
-// Initialize when DOM is ready
-if (typeof workspaceSelect !== 'undefined' && workspaceSelect) {
-  initWorkspaceUi().catch(console.error);
+// Initialize when all scripts are loaded
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'complete') {
+    initWorkspaceUi().catch(console.error);
+  } else {
+    window.addEventListener('load', () => initWorkspaceUi().catch(console.error));
+  }
 }
